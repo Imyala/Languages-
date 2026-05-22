@@ -1,0 +1,17 @@
+{
+  "name": "Gamer · Afrikaans",
+  "short_name": "Gamer Lang",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090c",
+  "theme_color": "#0a0e14",
+  "description": "Level up your Afrikaans through real writing, with adaptive feedback.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    }
+  ]
+}

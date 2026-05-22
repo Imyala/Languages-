@@ -1,0 +1,133 @@
+// Gamer-Lang schema. RPG mechanics under a clean surface.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  handle      String?
+  createdAt   DateTime @default(now())
+
+  profiles    AbilityProfile[]
+  placements  PlacementSession[]
+  submissions WritingSubmission[]
+  errors      ErrorTag[]
+  lexicon     LexiconEntry[]
+}
+
+// One profile per (user, language). Continuous abilities; level is derived.
+model AbilityProfile {
+  id          String   @id @default(cuid())
+  userId      String
+  language    String   // "af" for Afrikaans
+  reading     Float    @default(0)
+  writing     Float    @default(0)
+  grammar     Float    @default(0)
+  vocab       Float    @default(0)
+  // Confidence in each ability estimate, shrinks with practice
+  uncertainty Float    @default(1.0)
+  placed      Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, language])
+}
+
+// Adaptive placement quiz session
+model PlacementSession {
+  id          String          @id @default(cuid())
+  userId      String
+  language    String
+  startedAt   DateTime        @default(now())
+  completedAt DateTime?
+  // Final estimates emitted at completion
+  reading     Float?
+  writing     Float?
+  grammar     Float?
+  vocab       Float?
+  items       PlacementItem[]
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PlacementItem {
+  id         String   @id @default(cuid())
+  sessionId  String
+  order      Int
+  // 0..100 scale roughly mapped to CEFR (A1=15, A2=30, B1=50, B2=70, C1=85)
+  difficulty Float
+  skill      String   // "reading" | "grammar" | "vocab" | "writing"
+  // Item content (JSON-encoded; type-specific)
+  prompt     String
+  // Expected answer key (JSON-encoded)
+  answerKey  String
+  // What the user gave (JSON-encoded)
+  response   String?
+  correct    Boolean?
+  answeredAt DateTime?
+
+  session    PlacementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, order])
+}
+
+// Free-production writing submissions are the v0 core loop
+model WritingSubmission {
+  id            String   @id @default(cuid())
+  userId        String
+  language      String
+  promptText    String
+  promptLevel   Float    // difficulty 0..100
+  userText      String
+  // Structured grading from Claude (JSON)
+  gradingJson   String
+  // Deltas applied to the ability profile
+  deltaWriting  Float    @default(0)
+  deltaGrammar  Float    @default(0)
+  deltaVocab    Float    @default(0)
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  errors        ErrorTag[]
+}
+
+// One row per error Claude flags; aggregated to drive next prompt
+model ErrorTag {
+  id            String   @id @default(cuid())
+  userId        String
+  submissionId  String?
+  category      String   // grammar | spelling | word_order | word_choice | agreement | tense | other
+  structure     String?  // e.g. "verb-second", "double-negation", "definite-article"
+  example       String?
+  createdAt     DateTime @default(now())
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submission    WritingSubmission?  @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, category])
+  @@index([userId, structure])
+}
+
+// Words/phrases the user has used correctly. Lightweight SRS-ready table.
+model LexiconEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  language    String
+  lemma       String
+  firstSeen   DateTime @default(now())
+  lastUsed    DateTime @default(now())
+  uses        Int      @default(1)
+  mastery     Float    @default(0.1) // 0..1
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, language, lemma])
+}
