@@ -6,11 +6,14 @@ import "./globals.css";
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
+// GH Pages serves us under /Languages-/ — public/ assets need the prefix.
+const basePath = process.env.NEXT_BASE_PATH || "";
+
 export const metadata: Metadata = {
   title: "Gamer · Afrikaans",
   description:
     "Level up your Afrikaans through real writing, with adaptive feedback. RPG mechanics under a clean surface.",
-  manifest: "/manifest.webmanifest",
+  manifest: `${basePath}/manifest.webmanifest`,
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Gamer Lang" },
 };
 

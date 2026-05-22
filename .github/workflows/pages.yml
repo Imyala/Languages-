@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+on:
+  # Auto-deploy on every push to main.
+  push:
+    branches: [main]
+  # Manual trigger so you can deploy from any branch from the Actions tab.
+  workflow_dispatch:
+
+# Allow only one concurrent deployment; skip queued runs but never cancel
+# an in-progress one (a half-deployed Pages site is worse than a slow one).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (static export)
+        env:
+          # Required for GitHub Project Pages so the app is served under
+          # https://<user>.github.io/<repo>/ rather than the root.
+          NEXT_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          SERWIST_SUPPRESS_TURBOPACK_WARNING: "1"
+        run: npm run build
+
+      - name: Add .nojekyll
+        # GitHub Pages skips files starting with "_" by default (Jekyll
+        # convention). Next.js puts everything under "_next/", so we must
+        # disable Jekyll processing.
+        run: touch out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

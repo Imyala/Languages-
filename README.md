@@ -52,6 +52,17 @@ npm run preview   # serve it locally to test
 
 Drop `out/` onto **GitHub Pages**, **Cloudflare Pages**, **Netlify**, **S3**, or any static host. No server required.
 
+### GitHub Pages (automated)
+
+The repo ships `.github/workflows/pages.yml`. To enable:
+
+1. Push the branch to `main` (or merge — see below)
+2. Go to **Settings → Pages → Build and deployment** → **Source: GitHub Actions**
+3. The workflow runs on every push to `main` and on manual dispatch from the Actions tab
+4. Once green, your app is live at `https://<your-user>.github.io/Languages-/`
+
+The workflow sets `NEXT_BASE_PATH=/Languages-` so all asset and route URLs are correctly prefixed for the subpath, and writes `.nojekyll` so the `_next/` static chunks aren't ignored. To deploy from any branch on demand, use **Actions → Deploy to GitHub Pages → Run workflow**.
+
 ## Roadmap
 - Listening: dictation/shadowing using on-device TTS where supported
 - Reading: graded passages with comprehension drills (no AI needed; hand-authored)
