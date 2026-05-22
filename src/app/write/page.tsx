@@ -37,7 +37,38 @@ export default function WritePage() {
   const [deltas, setDeltas] = useState<Partial<AbilityProfile> | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [showModel, setShowModel] = useState(false);
+  // Live generation progress — fed by the streaming token callback.
+  const [genTokens, setGenTokens] = useState(0);
+  const [genElapsedMs, setGenElapsedMs] = useState(0);
+  const [genPhase, setGenPhase] = useState<"primary" | "repair">("primary");
+  const genStartedAt = useRef<number | null>(null);
   const initialized = useRef(false);
+
+  // Wall-clock elapsed counter — ticks every second while a model call is
+  // in flight so the user can see something is still happening even when
+  // tokens haven't landed yet (especially on phone CPUs).
+  useEffect(() => {
+    if (stage !== "loading-prompt" && stage !== "grading") return;
+    if (genStartedAt.current == null) genStartedAt.current = Date.now();
+    const id = setInterval(() => {
+      setGenElapsedMs(Date.now() - (genStartedAt.current ?? Date.now()));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [stage]);
+
+  function beginGenerationTimer() {
+    setGenTokens(0);
+    setGenElapsedMs(0);
+    setGenPhase("primary");
+    genStartedAt.current = Date.now();
+  }
+
+  function formatDuration(ms: number): string {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  }
 
   useEffect(() => {
     if (initialized.current) return;
@@ -58,6 +89,7 @@ export default function WritePage() {
   }, []);
 
   async function loadPrompt() {
+    beginGenerationTimer();
     setStage("loading-prompt");
     setError(null);
     try {
@@ -79,11 +111,15 @@ export default function WritePage() {
         .sortBy("createdAt");
       const recentTopics = recentSubs.slice(0, 3).map((s) => s.promptText.slice(0, 80));
 
-      const fresh = await generateWritingPrompt({
-        ability: p.writing,
-        weaknesses,
-        recentTopics,
-      });
+      const fresh = await generateWritingPrompt(
+        { ability: p.writing, weaknesses, recentTopics },
+        {
+          onProgress: ({ tokens, phase }) => {
+            setGenTokens(tokens);
+            setGenPhase(phase);
+          },
+        },
+      );
       setPrompt(fresh);
       setText("");
       setGrading(null);
@@ -98,15 +134,24 @@ export default function WritePage() {
 
   async function submit() {
     if (!prompt || !text.trim()) return;
+    beginGenerationTimer();
     setStage("grading");
     setError(null);
     try {
       const p = await getOrCreateProfile("af");
-      const g = await gradeWriting({
-        prompt,
-        userText: text,
-        currentAbility: { writing: p.writing, grammar: p.grammar, vocab: p.vocab },
-      });
+      const g = await gradeWriting(
+        {
+          prompt,
+          userText: text,
+          currentAbility: { writing: p.writing, grammar: p.grammar, vocab: p.vocab },
+        },
+        {
+          onProgress: ({ tokens, phase }) => {
+            setGenTokens(tokens);
+            setGenPhase(phase);
+          },
+        },
+      );
       const d = deltasFromGrading(
         { writing: p.writing, grammar: p.grammar, vocab: p.vocab },
         g,
@@ -229,11 +274,28 @@ export default function WritePage() {
     <div className="max-w-5xl mx-auto px-5 py-8 sm:py-12 grid gap-6 lg:grid-cols-3">
       <section className="lg:col-span-2 grid gap-6">
         {stage === "loading-prompt" || !prompt ? (
-          <div className="panel p-6 text-[color:var(--muted)]">
-            Generating a prompt at your level…
-            <div className="skill-bar mt-3">
-              <div className="fill" style={{ width: "30%" }} />
+          <div className="panel p-6 grid gap-3">
+            <div className="kicker">Generating a prompt at your level</div>
+            <div className="flex items-baseline justify-between gap-3 text-xs font-mono text-[color:var(--muted)]">
+              <span>
+                {genTokens > 0
+                  ? `${genTokens} tokens${genPhase === "repair" ? " · repair pass" : ""}`
+                  : "Warming up the model…"}
+              </span>
+              <span>{formatDuration(genElapsedMs)} elapsed</span>
             </div>
+            <div className="skill-bar">
+              {/* Token-count proxy: 1024 tokens is the cap for prompt gen. */}
+              <div
+                className="fill"
+                style={{
+                  width: `${Math.max(6, Math.min(100, Math.round((genTokens / 1024) * 100)))}%`,
+                }}
+              />
+            </div>
+            <p className="text-xs text-[color:var(--muted)]/70">
+              Phone CPUs typically take 20–60s. Each token tick means it&apos;s working.
+            </p>
           </div>
         ) : (
           <div className="panel panel-accent p-6">
@@ -300,15 +362,29 @@ export default function WritePage() {
         ) : null}
 
         {stage === "grading" ? (
-          <div className="panel p-5 text-sm text-[color:var(--muted)]">
-            <div className="kicker mb-2">Grading…</div>
-            <p>
-              The on-device model is reading your text. This can take 20–60s
-              depending on your hardware.
-            </p>
-            <div className="skill-bar mt-3">
-              <div className="fill" style={{ width: "60%" }} />
+          <div className="panel p-5 grid gap-3">
+            <div className="kicker">Grading</div>
+            <div className="flex items-baseline justify-between gap-3 text-xs font-mono text-[color:var(--muted)]">
+              <span>
+                {genTokens > 0
+                  ? `${genTokens} tokens${genPhase === "repair" ? " · repair pass" : ""}`
+                  : "Reading your text…"}
+              </span>
+              <span>{formatDuration(genElapsedMs)} elapsed</span>
             </div>
+            <div className="skill-bar">
+              {/* Grading max_tokens is 2048. */}
+              <div
+                className="fill"
+                style={{
+                  width: `${Math.max(6, Math.min(100, Math.round((genTokens / 2048) * 100)))}%`,
+                }}
+              />
+            </div>
+            <p className="text-xs text-[color:var(--muted)]/70">
+              The on-device model is reading your text. Each token tick means
+              it&apos;s working — feedback drops as soon as the response is complete.
+            </p>
           </div>
         ) : null}
 

@@ -7,11 +7,7 @@
 // WebLLM is large (~6 MB). Import types statically (zero runtime cost) but
 // load the implementation only when ensureEngine() is called, via a dynamic
 // import. This keeps the WebLLM chunk off every initial page load.
-import type {
-  MLCEngine,
-  InitProgressReport,
-  ChatCompletionRequestNonStreaming,
-} from "@mlc-ai/web-llm";
+import type { MLCEngine, InitProgressReport } from "@mlc-ai/web-llm";
 import { z } from "zod";
 import { cefrFor } from "./ability";
 
@@ -166,49 +162,75 @@ function parseJsonish<T>(raw: string): T {
   return JSON.parse(s) as T;
 }
 
-// JSON-mode chat. Small models miss schemas; we ask, then validate, then
-// take one retry with a "your previous output failed validation" nudge.
+export type GenProgress = {
+  tokens: number;
+  textSoFar: string;
+  phase: "primary" | "repair";
+};
+
+// Stream the model's response so the caller can show live token counts —
+// generation can take 30-90s on a phone and a static spinner feels stuck.
+// Validates the JSON when the stream finishes; on parse failure, takes one
+// repair retry that streams too.
 async function jsonChat<T>(opts: {
   system: string;
   user: string;
   schema: z.ZodType<T>;
   temperature?: number;
   max_tokens?: number;
+  onProgress?: (p: GenProgress) => void;
 }): Promise<T> {
   const eng = await ensureEngine();
-  const req: ChatCompletionRequestNonStreaming = {
-    messages: [
-      { role: "system", content: opts.system },
-      { role: "user", content: opts.user },
-    ],
-    temperature: opts.temperature ?? 0.3,
-    max_tokens: opts.max_tokens ?? 1024,
-    response_format: { type: "json_object" },
-  };
+
+  async function streamOnce(
+    messages: { role: "system" | "user" | "assistant"; content: string }[],
+    temperature: number,
+    phase: "primary" | "repair",
+  ): Promise<string> {
+    const stream = await eng.chat.completions.create({
+      messages,
+      temperature,
+      max_tokens: opts.max_tokens ?? 1024,
+      response_format: { type: "json_object" },
+      stream: true,
+    });
+    let acc = "";
+    let tokens = 0;
+    for await (const chunk of stream as AsyncIterable<{
+      choices: Array<{ delta?: { content?: string } }>;
+    }>) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        acc += delta;
+        tokens += 1;
+        opts.onProgress?.({ tokens, textSoFar: acc, phase });
+      }
+    }
+    return acc;
+  }
+
+  const primaryMessages = [
+    { role: "system" as const, content: opts.system },
+    { role: "user" as const, content: opts.user },
+  ];
+
   let raw = "";
   try {
-    const r = await eng.chat.completions.create(req);
-    raw = r.choices[0]?.message?.content ?? "";
+    raw = await streamOnce(primaryMessages, opts.temperature ?? 0.3, "primary");
     return opts.schema.parse(parseJsonish(raw));
   } catch (firstErr) {
     // One retry with explicit repair hint.
-    const repair = await eng.chat.completions.create({
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-        { role: "assistant", content: raw },
-        {
-          role: "user",
-          content:
-            "Your previous reply did not produce a valid JSON object matching the required schema. Reply again with ONLY the JSON object. No prose, no markdown fences.",
-        },
-      ],
-      temperature: 0,
-      max_tokens: opts.max_tokens ?? 1024,
-      response_format: { type: "json_object" },
-    });
-    const raw2 = repair.choices[0]?.message?.content ?? "";
+    const repairMessages = [
+      ...primaryMessages,
+      { role: "assistant" as const, content: raw },
+      {
+        role: "user" as const,
+        content:
+          "Your previous reply did not produce a valid JSON object matching the required schema. Reply again with ONLY the JSON object. No prose, no markdown fences.",
+      },
+    ];
     try {
+      const raw2 = await streamOnce(repairMessages, 0, "repair");
       return opts.schema.parse(parseJsonish(raw2));
     } catch {
       throw firstErr;
@@ -236,11 +258,14 @@ Schema:
 Calibrate length to level: A1 ~ 25-50 words, A2 ~ 50-80, B1 ~ 80-130, B2 ~ 130-180, C1 ~ 180-250.
 Vary topics. Avoid clichéd "describe your daily routine" unless A1.`;
 
-export async function generateWritingPrompt(input: {
-  ability: number;
-  weaknesses: string[];
-  recentTopics: string[];
-}): Promise<WritingPrompt> {
+export async function generateWritingPrompt(
+  input: {
+    ability: number;
+    weaknesses: string[];
+    recentTopics: string[];
+  },
+  opts?: { onProgress?: (p: GenProgress) => void },
+): Promise<WritingPrompt> {
   const band = cefrFor(input.ability);
   const user = `Learner profile:
 - Writing ability: ${input.ability.toFixed(0)}/100 (CEFR ${band})
@@ -254,6 +279,7 @@ Generate the next prompt JSON.`;
     schema: WritingPromptSchema,
     temperature: 0.6,
     max_tokens: 1024,
+    onProgress: opts?.onProgress,
   });
 }
 
@@ -279,11 +305,14 @@ Rules:
 - Each error must point at a real span from the learner's text in "original" with a concrete fix in "correction".
 - Don't rewrite stylistic choices unless they are wrong.`;
 
-export async function gradeWriting(input: {
-  prompt: WritingPrompt;
-  userText: string;
-  currentAbility: { writing: number; grammar: number; vocab: number };
-}): Promise<Grading> {
+export async function gradeWriting(
+  input: {
+    prompt: WritingPrompt;
+    userText: string;
+    currentAbility: { writing: number; grammar: number; vocab: number };
+  },
+  opts?: { onProgress?: (p: GenProgress) => void },
+): Promise<Grading> {
   const band = cefrFor(input.currentAbility.writing);
   const user = `Prompt (in English): ${input.prompt.promptTextEnglish}
 Target length: ${input.prompt.targetWordCount}
@@ -306,6 +335,7 @@ Grade it. Return only the JSON.`;
     schema: GradingSchema,
     temperature: 0.2,
     max_tokens: 2048,
+    onProgress: opts?.onProgress,
   });
 }
 

@@ -62,7 +62,9 @@ export function ModelLoader({
     if (status !== "loading" || progress <= 0.02 || elapsedMs < 2000) return;
     const projectedTotal = elapsedMs / progress;
     const rawRemaining = Math.max(0, projectedTotal - elapsedMs);
-    setSmoothedEtaMs((prev) => (prev == null ? rawRemaining : prev * 0.7 + rawRemaining * 0.3));
+    // EMA alpha 0.15 — heavy inertia so the ETA settles rather than jumping
+    // with every chunk. Trade-off: slower to react to real throughput changes.
+    setSmoothedEtaMs((prev) => (prev == null ? rawRemaining : prev * 0.85 + rawRemaining * 0.15));
   }, [progress, elapsedMs, status]);
 
   useEffect(() => {
