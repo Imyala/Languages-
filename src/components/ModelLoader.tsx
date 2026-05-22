@@ -24,6 +24,10 @@ export function ModelLoader({
   const [progress, setProgress] = useState<number>(0);
   const [progressText, setProgressText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  // Wall-clock timer state (ticks every second while loading, smooth)
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
+  const [smoothedEtaMs, setSmoothedEtaMs] = useState<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
   const triggered = useRef(false);
 
   useEffect(() => {
@@ -41,6 +45,26 @@ export function ModelLoader({
     return off;
   }, []);
 
+  // Tick once per second while loading so elapsed time advances smoothly,
+  // independent of WebLLM's chunk-by-chunk callbacks.
+  useEffect(() => {
+    if (status !== "loading") return;
+    if (startedAtRef.current == null) startedAtRef.current = Date.now();
+    const id = setInterval(() => {
+      const t = Date.now() - (startedAtRef.current ?? Date.now());
+      setElapsedMs(t);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  // Smooth the ETA via EMA so it doesn't jump every time a chunk lands.
+  useEffect(() => {
+    if (status !== "loading" || progress <= 0.02 || elapsedMs < 2000) return;
+    const projectedTotal = elapsedMs / progress;
+    const rawRemaining = Math.max(0, projectedTotal - elapsedMs);
+    setSmoothedEtaMs((prev) => (prev == null ? rawRemaining : prev * 0.7 + rawRemaining * 0.3));
+  }, [progress, elapsedMs, status]);
+
   useEffect(() => {
     if (status === "ready") onReady?.();
   }, [status, onReady]);
@@ -55,6 +79,11 @@ export function ModelLoader({
   async function start() {
     if (status === "loading") return;
     setError(null);
+    setProgress(0);
+    setProgressText("");
+    setElapsedMs(0);
+    setSmoothedEtaMs(null);
+    startedAtRef.current = Date.now();
     setStatus("loading");
     try {
       if (typeof navigator !== "undefined" && !("gpu" in navigator)) {
@@ -69,6 +98,13 @@ export function ModelLoader({
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
     }
+  }
+
+  function formatDuration(ms: number): string {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
   }
 
   if (status === "ready") {
@@ -124,9 +160,25 @@ export function ModelLoader({
           <div className="skill-bar">
             <div className="fill" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
-          <div className="text-xs font-mono text-[color:var(--muted)] truncate">
-            {progressText || "Initializing…"}
+          <div className="flex items-baseline justify-between gap-3 text-xs font-mono text-[color:var(--muted)]">
+            <span>
+              {progress > 0
+                ? `${Math.round(progress * 100)}% · ${formatDuration(elapsedMs)} elapsed`
+                : `${formatDuration(elapsedMs)} elapsed`}
+            </span>
+            <span>
+              {smoothedEtaMs != null && progress > 0.02 && progress < 1
+                ? `~${formatDuration(smoothedEtaMs)} remaining`
+                : progress === 0
+                  ? "Initializing…"
+                  : ""}
+            </span>
           </div>
+          {progressText ? (
+            <div className="text-[11px] text-[color:var(--muted)]/70 truncate">
+              {progressText}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex gap-3">
