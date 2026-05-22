@@ -31,6 +31,10 @@ Open http://localhost:3000.
 3. **Stats update** — Each grading nudges your ability scores ~20% toward Claude's estimate. Errors become a *weakness log* that drives future prompts (spaced repetition over structures, not flashcards).
 4. **Lexicon** — Words you used correctly enter your personal lexicon as "loot."
 
+## Deploy
+
+See [DEPLOY.md](./DEPLOY.md). Short version: Vercel + a free Postgres (Neon recommended) + your Claude API key. ~5 minutes once you have the URLs in hand.
+
 ## Roadmap (next)
 - Listening: dictation/shadowing with TTS + speech-to-text
 - Reading: graded passages with comprehension drills

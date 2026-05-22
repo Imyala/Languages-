@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "build:prod": "npx prisma generate --schema=prisma-prod/schema.prisma && npx prisma db push --schema=prisma-prod/schema.prisma --skip-generate --accept-data-loss && next build",
+    "start": "next start",
+    "prisma:dev": "npx prisma migrate dev",
+    "prisma:prod:push": "DATABASE_URL=\"$DATABASE_URL\" npx prisma db push --schema=prisma-prod/schema.prisma"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",

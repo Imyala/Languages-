@@ -1,0 +1,122 @@
+// Production schema — Postgres target.
+// Local dev uses ../prisma/schema.prisma (SQLite); both compile to the same
+// generated client at ../src/generated/prisma, so app code is identical.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  handle      String?
+  createdAt   DateTime @default(now())
+
+  profiles    AbilityProfile[]
+  placements  PlacementSession[]
+  submissions WritingSubmission[]
+  errors      ErrorTag[]
+  lexicon     LexiconEntry[]
+}
+
+model AbilityProfile {
+  id          String   @id @default(cuid())
+  userId      String
+  language    String
+  reading     Float    @default(0)
+  writing     Float    @default(0)
+  grammar     Float    @default(0)
+  vocab       Float    @default(0)
+  uncertainty Float    @default(1.0)
+  placed      Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, language])
+}
+
+model PlacementSession {
+  id          String          @id @default(cuid())
+  userId      String
+  language    String
+  startedAt   DateTime        @default(now())
+  completedAt DateTime?
+  reading     Float?
+  writing     Float?
+  grammar     Float?
+  vocab       Float?
+  items       PlacementItem[]
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PlacementItem {
+  id         String   @id @default(cuid())
+  sessionId  String
+  order      Int
+  difficulty Float
+  skill      String
+  prompt     String
+  answerKey  String
+  response   String?
+  correct    Boolean?
+  answeredAt DateTime?
+
+  session    PlacementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, order])
+}
+
+model WritingSubmission {
+  id            String   @id @default(cuid())
+  userId        String
+  language      String
+  promptText    String
+  promptLevel   Float
+  userText      String
+  gradingJson   String
+  deltaWriting  Float    @default(0)
+  deltaGrammar  Float    @default(0)
+  deltaVocab    Float    @default(0)
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  errors        ErrorTag[]
+}
+
+model ErrorTag {
+  id            String   @id @default(cuid())
+  userId        String
+  submissionId  String?
+  category      String
+  structure     String?
+  example       String?
+  createdAt     DateTime @default(now())
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submission    WritingSubmission?  @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, category])
+  @@index([userId, structure])
+}
+
+model LexiconEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  language    String
+  lemma       String
+  firstSeen   DateTime @default(now())
+  lastUsed    DateTime @default(now())
+  uses        Int      @default(1)
+  mastery     Float    @default(0.1)
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, language, lemma])
+}
