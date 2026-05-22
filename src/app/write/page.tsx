@@ -3,119 +3,190 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { StatusPanel } from "@/components/StatusPanel";
+import { ModelLoader } from "@/components/ModelLoader";
+import {
+  deltasFromGrading,
+  generateWritingPrompt,
+  gradeWriting,
+  isModelReady,
+  type Grading,
+  type WritingPrompt,
+} from "@/lib/local-ai";
+import {
+  db,
+  getOrCreateProfile,
+  newId,
+  updateProfile,
+  type AbilityProfile,
+} from "@/lib/storage";
 
-type WritingPrompt = {
-  promptTextEnglish: string;
-  targetWordCount: string;
-  requiredStructures: string[];
-  modelAnswer: string;
-  encouragement: string;
-};
-
-type Grading = {
-  correctedText: string;
-  errors: Array<{
-    category: string;
-    structure?: string;
-    original: string;
-    correction: string;
-    explanation: string;
-  }>;
-  scores: {
-    fluency: number;
-    accuracy: number;
-    complexity: number;
-    vocab_range: number;
-    task_completion: number;
-  };
-  praise: string[];
-  newWordsUsedCorrectly: string[];
-  overallFeedback: string;
-  abilityEstimate: { writing: number; grammar: number; vocab: number };
-};
-
-type Profile = { reading: number; writing: number; grammar: number; vocab: number };
+type Stage =
+  | "needs-placement"
+  | "needs-model"
+  | "loading-prompt"
+  | "writing"
+  | "grading"
+  | "graded";
 
 export default function WritePage() {
+  const [stage, setStage] = useState<Stage>("loading-prompt");
+  const [profile, setProfile] = useState<AbilityProfile | null>(null);
   const [prompt, setPrompt] = useState<WritingPrompt | null>(null);
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState(true);
   const [grading, setGrading] = useState<Grading | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [deltas, setDeltas] = useState<Partial<Profile> | undefined>();
+  const [deltas, setDeltas] = useState<Partial<AbilityProfile> | undefined>();
   const [error, setError] = useState<string | null>(null);
-  const [grading_, setGrading_] = useState(false);
   const [showModel, setShowModel] = useState(false);
-  const started = useRef(false);
+  const initialized = useRef(false);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    fetch("/api/write/prompt")
-      .then(async (r) => {
-        const j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.error ?? "Failed to load prompt");
-        setPrompt(j.prompt as WritingPrompt);
-      })
-      .catch((e) => setError(String(e.message ?? e)))
-      .finally(() => setLoading(false));
-    fetch("/api/profile")
-      .then((r) => r.json())
-      .then((p) =>
-        setProfile({
-          reading: p.reading,
-          writing: p.writing,
-          grammar: p.grammar,
-          vocab: p.vocab,
-        }),
-      )
-      .catch(() => {});
+    if (initialized.current) return;
+    initialized.current = true;
+    (async () => {
+      const p = await getOrCreateProfile("af");
+      setProfile(p);
+      if (!p.placed) {
+        setStage("needs-placement");
+        return;
+      }
+      if (!isModelReady()) {
+        setStage("needs-model");
+        return;
+      }
+      await loadPrompt();
+    })();
   }, []);
 
-  async function submit() {
-    if (!prompt || text.trim().length === 0 || grading_) return;
-    setGrading_(true);
+  async function loadPrompt() {
+    setStage("loading-prompt");
     setError(null);
     try {
-      const r = await fetch("/api/write/grade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, userText: text }),
+      const p = await getOrCreateProfile("af");
+      const tags = await db().errorTags.toArray();
+      const grouped = new Map<string, number>();
+      for (const t of tags) {
+        if (t.structure) grouped.set(t.structure, (grouped.get(t.structure) ?? 0) + 1);
+      }
+      const weaknesses = [...grouped.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([s]) => s);
+
+      const recentSubs = await db()
+        .writingSubmissions.where("language")
+        .equals("af")
+        .reverse()
+        .sortBy("createdAt");
+      const recentTopics = recentSubs.slice(0, 3).map((s) => s.promptText.slice(0, 80));
+
+      const fresh = await generateWritingPrompt({
+        ability: p.writing,
+        weaknesses,
+        recentTopics,
       });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.error ?? "Failed to grade");
-      setGrading(j.grading as Grading);
-      setProfile(j.profile as Profile);
-      setDeltas(j.deltas as Partial<Profile>);
+      setPrompt(fresh);
+      setText("");
+      setGrading(null);
+      setDeltas(undefined);
+      setShowModel(false);
+      setStage("writing");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGrading_(false);
+      setStage("writing");
     }
   }
 
-  async function newPrompt() {
-    setLoading(true);
-    setPrompt(null);
-    setGrading(null);
-    setText("");
-    setShowModel(false);
-    setDeltas(undefined);
+  async function submit() {
+    if (!prompt || !text.trim()) return;
+    setStage("grading");
+    setError(null);
     try {
-      const r = await fetch("/api/write/prompt");
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.error ?? "Failed to load prompt");
-      setPrompt(j.prompt as WritingPrompt);
+      const p = await getOrCreateProfile("af");
+      const g = await gradeWriting({
+        prompt,
+        userText: text,
+        currentAbility: { writing: p.writing, grammar: p.grammar, vocab: p.vocab },
+      });
+      const d = deltasFromGrading(
+        { writing: p.writing, grammar: p.grammar, vocab: p.vocab },
+        g,
+      );
+
+      // Persist submission.
+      const submissionId = newId();
+      await db().writingSubmissions.put({
+        id: submissionId,
+        language: "af",
+        createdAt: Date.now(),
+        promptText: prompt.promptTextEnglish,
+        promptLevel: p.writing,
+        userText: text,
+        gradingJson: JSON.stringify(g),
+        deltaWriting: d.writing,
+        deltaGrammar: d.grammar,
+        deltaVocab: d.vocab,
+      });
+
+      // Error tags.
+      if (g.errors.length > 0) {
+        await db().errorTags.bulkPut(
+          g.errors.map((e) => ({
+            id: newId(),
+            submissionId,
+            createdAt: Date.now(),
+            category: e.category,
+            structure: e.structure ?? null,
+            example: `${e.original} → ${e.correction}`,
+          })),
+        );
+      }
+
+      // Lexicon additions.
+      for (const lemma of g.newWordsUsedCorrectly) {
+        const id = `af:${lemma}`;
+        const existing = await db().lexicon.get(id);
+        if (existing) {
+          await db().lexicon.put({
+            ...existing,
+            uses: existing.uses + 1,
+            lastUsed: Date.now(),
+            mastery: Math.min(1, existing.mastery + 0.1),
+          });
+        } else {
+          await db().lexicon.put({
+            id,
+            language: "af",
+            lemma,
+            firstSeen: Date.now(),
+            lastUsed: Date.now(),
+            uses: 1,
+            mastery: 0.1,
+          });
+        }
+      }
+
+      const updated = await updateProfile("af", {
+        writing: p.writing + d.writing,
+        grammar: p.grammar + d.grammar,
+        vocab: p.vocab + d.vocab,
+        uncertainty: Math.max(0.1, p.uncertainty * 0.95),
+      });
+
+      setGrading(g);
+      setDeltas(d);
+      setProfile(updated);
+      setStage("graded");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
+      setStage("writing");
     }
   }
 
-  const needsPlacement = error?.toLowerCase().includes("placement");
+  // -----------------------------------------------------------------------
+  // Renders
+  // -----------------------------------------------------------------------
 
-  if (needsPlacement) {
+  if (stage === "needs-placement") {
     return (
       <div className="max-w-2xl mx-auto px-5 py-16">
         <div className="panel p-6">
@@ -137,12 +208,32 @@ export default function WritePage() {
     );
   }
 
+  if (stage === "needs-model") {
+    return (
+      <div className="max-w-2xl mx-auto px-5 py-8 sm:py-12 grid gap-6">
+        <div>
+          <div className="kicker mb-2">One-time setup</div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Download the grader to your browser.
+          </h1>
+          <p className="text-[color:var(--muted)] mt-2 max-w-prose">
+            Once cached, it stays on your device and works offline.
+          </p>
+        </div>
+        <ModelLoader auto onReady={() => loadPrompt()} />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-5 py-8 sm:py-12 grid gap-6 lg:grid-cols-3">
       <section className="lg:col-span-2 grid gap-6">
-        {loading || !prompt ? (
+        {stage === "loading-prompt" || !prompt ? (
           <div className="panel p-6 text-[color:var(--muted)]">
             Generating a prompt at your level…
+            <div className="skill-bar mt-3">
+              <div className="fill" style={{ width: "30%" }} />
+            </div>
           </div>
         ) : (
           <div className="panel panel-accent p-6">
@@ -176,33 +267,24 @@ export default function WritePage() {
           </div>
         )}
 
-        {prompt && !grading ? (
+        {stage === "writing" && prompt ? (
           <div className="grid gap-3">
             <textarea
               className="writing"
               placeholder="Skryf in Afrikaans…"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              disabled={grading_}
             />
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-[color:var(--muted)]">
                 {text.trim() ? `${text.trim().split(/\s+/).length} words` : "Empty"}
               </span>
               <div className="flex gap-3">
-                <button
-                  className="btn"
-                  onClick={() => setShowModel((v) => !v)}
-                  disabled={grading_}
-                >
+                <button className="btn" onClick={() => setShowModel((v) => !v)}>
                   {showModel ? "Hide model answer" : "Peek at model"}
                 </button>
-                <button
-                  className="btn btn-primary"
-                  disabled={!text.trim() || grading_}
-                  onClick={submit}
-                >
-                  {grading_ ? "Grading…" : "Submit for grading"}
+                <button className="btn btn-primary" disabled={!text.trim()} onClick={submit}>
+                  Submit for grading
                 </button>
               </div>
             </div>
@@ -217,11 +299,24 @@ export default function WritePage() {
           </div>
         ) : null}
 
-        {grading ? <GradingView grading={grading} userText={text} /> : null}
+        {stage === "grading" ? (
+          <div className="panel p-5 text-sm text-[color:var(--muted)]">
+            <div className="kicker mb-2">Grading…</div>
+            <p>
+              The on-device model is reading your text. This can take 20–60s
+              depending on your hardware.
+            </p>
+            <div className="skill-bar mt-3">
+              <div className="fill" style={{ width: "60%" }} />
+            </div>
+          </div>
+        ) : null}
 
-        {grading ? (
+        {stage === "graded" && grading ? <GradingView grading={grading} userText={text} /> : null}
+
+        {stage === "graded" ? (
           <div className="flex gap-3">
-            <button className="btn btn-primary" onClick={newPrompt}>
+            <button className="btn btn-primary" onClick={loadPrompt}>
               Next prompt
             </button>
             <Link href="/" className="btn">
@@ -230,7 +325,7 @@ export default function WritePage() {
           </div>
         ) : null}
 
-        {error && !needsPlacement ? (
+        {error ? (
           <div className="panel p-4 border-[color:var(--bad)]/30 text-sm">
             <span className="kicker text-[color:var(--bad)] mr-2">Error</span>
             {error}
@@ -251,6 +346,8 @@ export default function WritePage() {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
 
 function GradingView({ grading, userText }: { grading: Grading; userText: string }) {
   return (

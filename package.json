@@ -3,20 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "build:prod": "npx prisma generate --schema=prisma-prod/schema.prisma && npx prisma db push --schema=prisma-prod/schema.prisma --skip-generate --accept-data-loss && next build",
-    "start": "next start",
-    "prisma:dev": "npx prisma migrate dev",
-    "prisma:prod:push": "DATABASE_URL=\"$DATABASE_URL\" npx prisma db push --schema=prisma-prod/schema.prisma"
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "preview": "npx serve out",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.98.0",
-    "@prisma/client": "^6.19.3",
+    "@mlc-ai/web-llm": "^0.2.83",
+    "@serwist/next": "^9.5.11",
+    "dexie": "^4.4.2",
     "next": "16.2.6",
-    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "serwist": "^9.5.11",
     "zod": "^4.4.3",
     "zustand": "^5.0.13"
   },
@@ -25,7 +24,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
     "typescript": "^5"

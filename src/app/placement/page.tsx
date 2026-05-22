@@ -3,106 +3,193 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { StatusPanel } from "@/components/StatusPanel";
+import {
+  difficultyForNextItem,
+  updateAbility,
+  type SkillKey,
+} from "@/lib/ability";
+import {
+  PLACEMENT_BANK_AF,
+  pickItemByDifficulty,
+  type PlacementMCQ,
+} from "@/lib/placement-bank";
+import {
+  db,
+  getOrCreateProfile,
+  newId,
+  updateProfile,
+  type AbilityProfile,
+  type PlacementSession,
+} from "@/lib/storage";
 
-type Item = {
-  context?: string;
-  prompt: string;
-  choices: string[];
-  skill: string;
-  difficulty: number;
-};
+const TOTAL_ITEMS = 12;
 
-type StartResp = {
-  sessionId: string;
-  order: number;
-  total: number;
-  item: Item;
-};
-
-type AnswerResp =
-  | { done: false; correct: boolean; explanation: string; order: number; total: number; item: Item }
+type Phase =
+  | { phase: "loading" }
   | {
-      done: true;
-      correct: boolean;
-      explanation: string;
-      profile: { reading: number; writing: number; grammar: number; vocab: number };
-    };
+      phase: "playing";
+      session: PlacementSession;
+      item: PlacementMCQ;
+      feedback?: { correct: boolean; chosen: number };
+      submitting?: boolean;
+    }
+  | { phase: "done"; profile: AbilityProfile }
+  | { phase: "error"; message: string };
 
 export default function PlacementPage() {
-  const [state, setState] = useState<
-    | { phase: "idle" }
-    | { phase: "loading" }
-    | {
-        phase: "playing";
-        sessionId: string;
-        order: number;
-        total: number;
-        item: Item;
-        feedback?: { correct: boolean; explanation: string; chosen: number };
-        submitting?: boolean;
-      }
-    | { phase: "done"; profile: { reading: number; writing: number; grammar: number; vocab: number } }
-    | { phase: "error"; message: string }
-  >({ phase: "idle" });
-
+  const [state, setState] = useState<Phase>({ phase: "loading" });
   const started = useRef(false);
+
   useEffect(() => {
-    if (state.phase !== "idle" || started.current) return;
+    if (started.current) return;
     started.current = true;
-    setState({ phase: "loading" });
-    fetch("/api/placement/start", { method: "POST" })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return (await r.json()) as StartResp;
-      })
-      .then((data) =>
+    (async () => {
+      try {
+        await getOrCreateProfile("af");
+        // Start a new session.
+        const session: PlacementSession = {
+          id: newId(),
+          language: "af",
+          startedAt: Date.now(),
+          completedAt: null,
+          asked: [],
+          order: 1,
+          total: TOTAL_ITEMS,
+        };
+        await db().placementSessions.put(session);
+
+        const first = pickItemByDifficulty(30, new Set());
+        if (!first) throw new Error("Placement bank empty");
+        await db().placementItems.put({
+          id: newId(),
+          sessionId: session.id,
+          order: 1,
+          bankId: first.id,
+          difficulty: first.difficulty,
+          skill: first.skill,
+          response: null,
+          correct: null,
+        });
+        await db().placementSessions.put({ ...session, asked: [first.id] });
+
         setState({
           phase: "playing",
-          sessionId: data.sessionId,
-          order: data.order,
-          total: data.total,
-          item: data.item,
-        }),
-      )
-      .catch((err) => setState({ phase: "error", message: String(err.message ?? err) }));
-  }, [state.phase]);
+          session: { ...session, asked: [first.id] },
+          item: first,
+        });
+      } catch (e) {
+        setState({
+          phase: "error",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
+  }, []);
 
   async function answer(choice: number) {
     if (state.phase !== "playing" || state.feedback || state.submitting) return;
     setState({ ...state, submitting: true });
-    const resp = await fetch("/api/placement/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: state.sessionId, choiceIndex: choice }),
-    });
-    if (!resp.ok) {
-      setState({ phase: "error", message: await resp.text() });
-      return;
+
+    const correct = choice === state.item.correctIndex;
+
+    // Mark the current placementItem with the answer.
+    const items = await db()
+      .placementItems.where({ sessionId: state.session.id })
+      .toArray();
+    const current = items.find((i) => i.order === state.session.order);
+    if (current) {
+      await db().placementItems.put({ ...current, response: choice, correct });
     }
-    const data = (await resp.json()) as AnswerResp;
+
+    // Update ability via the same math we used server-side.
+    const profile = await getOrCreateProfile("af");
+    const skill = state.item.skill as SkillKey;
+    const ability =
+      skill === "reading"
+        ? profile.reading
+        : skill === "grammar"
+          ? profile.grammar
+          : skill === "vocab"
+            ? profile.vocab
+            : profile.writing;
+    const { ability: newAbility, uncertainty: newUncertainty } = updateAbility(
+      ability,
+      profile.uncertainty,
+      state.item.difficulty,
+      correct,
+    );
+
+    const patch: Partial<AbilityProfile> = { uncertainty: newUncertainty };
+    if (skill === "reading") patch.reading = newAbility;
+    if (skill === "grammar") {
+      patch.grammar = newAbility;
+      patch.writing = profile.writing + (newAbility - profile.grammar) * 0.3;
+    }
+    if (skill === "vocab") {
+      patch.vocab = newAbility;
+      patch.writing = profile.writing + (newAbility - profile.vocab) * 0.2;
+    }
+    const updated = await updateProfile("af", patch);
+
     setState({
       ...state,
       submitting: false,
-      feedback: { correct: data.correct, explanation: data.explanation, chosen: choice },
+      feedback: { correct, chosen: choice },
     });
 
-    // After a short pause showing feedback, advance.
-    setTimeout(() => {
-      if (data.done) {
-        setState({ phase: "done", profile: data.profile });
-      } else {
-        setState({
-          phase: "playing",
-          sessionId: state.sessionId,
-          order: data.order,
-          total: data.total,
-          item: data.item,
+    setTimeout(async () => {
+      const isLast = state.session.order >= TOTAL_ITEMS;
+      if (isLast) {
+        const finalProfile = await updateProfile("af", { placed: true });
+        await db().placementSessions.put({
+          ...state.session,
+          completedAt: Date.now(),
+          order: state.session.order,
         });
+        setState({ phase: "done", profile: finalProfile });
+        return;
       }
+      // Pick next item.
+      const askedIds = new Set(state.session.asked);
+      const center = (updated.grammar + updated.vocab + updated.reading) / 3;
+      const askedDifficulties = (
+        await db()
+          .placementItems.where({ sessionId: state.session.id })
+          .toArray()
+      ).map((i) => i.difficulty);
+      const nextDifficulty = difficultyForNextItem(
+        center || updated.grammar || 30,
+        askedDifficulties,
+      );
+      const next = pickItemByDifficulty(nextDifficulty, askedIds);
+      if (!next) {
+        const finalProfile = await updateProfile("af", { placed: true });
+        setState({ phase: "done", profile: finalProfile });
+        return;
+      }
+      const newOrder = state.session.order + 1;
+      const newAsked = [...state.session.asked, next.id];
+      await db().placementItems.put({
+        id: newId(),
+        sessionId: state.session.id,
+        order: newOrder,
+        bankId: next.id,
+        difficulty: next.difficulty,
+        skill: next.skill,
+        response: null,
+        correct: null,
+      });
+      const newSession = {
+        ...state.session,
+        order: newOrder,
+        asked: newAsked,
+      };
+      await db().placementSessions.put(newSession);
+      setState({ phase: "playing", session: newSession, item: next });
     }, 1600);
   }
 
-  if (state.phase === "loading" || state.phase === "idle") {
+  if (state.phase === "loading") {
     return (
       <div className="max-w-2xl mx-auto px-5 py-16 text-center text-[color:var(--muted)]">
         Spinning up your placement session…
@@ -146,13 +233,16 @@ export default function PlacementPage() {
     );
   }
 
-  const { item, order, total, feedback } = state;
+  const { item, session, feedback } = state;
+  // Look up explanation by ID (placement bank has it).
+  const bankItem = PLACEMENT_BANK_AF.find((i) => i.id === item.id);
+  const explanation = bankItem?.explanation ?? "";
 
   return (
     <div className="max-w-2xl mx-auto px-5 py-8 sm:py-12 grid gap-6">
       <div className="flex items-baseline justify-between">
         <div className="kicker">
-          Placement · {order} / {total}
+          Placement · {session.order} / {TOTAL_ITEMS}
         </div>
         <div className="text-xs font-mono text-[color:var(--muted)]">
           skill: {item.skill} · diff {Math.round(item.difficulty)}
@@ -195,7 +285,7 @@ export default function PlacementPage() {
             <strong className="block mb-1">
               {feedback.correct ? "Correct." : "Not quite."}
             </strong>
-            <span className="text-[color:var(--muted)]">{feedback.explanation}</span>
+            <span className="text-[color:var(--muted)]">{explanation}</span>
           </div>
         ) : null}
       </div>

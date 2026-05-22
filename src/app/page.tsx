@@ -1,38 +1,57 @@
+"use client";
+
 import Link from "next/link";
-import { getOrCreateUser } from "@/lib/user";
-import { prisma } from "@/lib/db";
+import { useEffect, useState } from "react";
 import { StatusPanel } from "@/components/StatusPanel";
 import { cefrFor } from "@/lib/ability";
+import {
+  db,
+  getOrCreateProfile,
+  type AbilityProfile,
+  type WritingSubmission,
+} from "@/lib/storage";
 
-export const dynamic = "force-dynamic";
+type WeaknessRow = { structure: string; count: number };
 
-export default async function Home() {
-  const { user, profile } = await getOrCreateUser("af");
+export default function Home() {
+  const [profile, setProfile] = useState<AbilityProfile | null>(null);
+  const [submissionCount, setSubmissionCount] = useState(0);
+  const [lexiconCount, setLexiconCount] = useState(0);
+  const [weaknesses, setWeaknesses] = useState<WeaknessRow[]>([]);
+  const [recent, setRecent] = useState<WritingSubmission[]>([]);
 
-  const [submissionCount, lexiconCount, weaknesses, recent] = await Promise.all([
-    prisma.writingSubmission.count({ where: { userId: user.id } }),
-    prisma.lexiconEntry.count({ where: { userId: user.id, language: "af" } }),
-    prisma.errorTag.groupBy({
-      by: ["structure"],
-      where: { userId: user.id, structure: { not: null } },
-      _count: { structure: true },
-      orderBy: { _count: { structure: "desc" } },
-      take: 4,
-    }),
-    prisma.writingSubmission.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 4,
-      select: {
-        id: true,
-        createdAt: true,
-        promptText: true,
-        deltaWriting: true,
-        deltaGrammar: true,
-        deltaVocab: true,
-      },
-    }),
-  ]);
+  useEffect(() => {
+    (async () => {
+      const p = await getOrCreateProfile("af");
+      setProfile(p);
+      const dbi = db();
+      setSubmissionCount(await dbi.writingSubmissions.count());
+      setLexiconCount(await dbi.lexicon.where({ language: "af" }).count());
+      const tags = await dbi.errorTags.toArray();
+      const grouped = new Map<string, number>();
+      for (const t of tags) if (t.structure) grouped.set(t.structure, (grouped.get(t.structure) ?? 0) + 1);
+      setWeaknesses(
+        [...grouped.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([structure, count]) => ({ structure, count })),
+      );
+      const subs = await dbi.writingSubmissions
+        .where("language")
+        .equals("af")
+        .reverse()
+        .sortBy("createdAt");
+      setRecent(subs.slice(0, 4));
+    })();
+  }, []);
+
+  if (!profile) {
+    return (
+      <div className="max-w-3xl mx-auto px-5 py-16 text-center text-[color:var(--muted)]">
+        Loading your status…
+      </div>
+    );
+  }
 
   const placed = profile.placed;
 
@@ -51,9 +70,12 @@ export default async function Home() {
               keeps your stats honest from there. No streaks, no hearts. Just
               writing that gets graded.
             </p>
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex gap-3 flex-wrap">
               <Link href="/placement" className="btn btn-primary">
                 Start placement
+              </Link>
+              <Link href="/setup" className="btn">
+                Set up offline AI
               </Link>
             </div>
           </div>
@@ -64,16 +86,18 @@ export default async function Home() {
               Write at level {cefrFor(profile.writing)}.
             </h1>
             <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-              Free-production writing in Afrikaans. We&apos;ll generate a prompt
-              targeted at your weaknesses, grade what you write, surface concrete
-              corrections, and update your stats from real performance.
+              Free-production writing in Afrikaans, graded on-device. Stats move
+              from real performance — not from streaks.
             </p>
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex gap-3 flex-wrap">
               <Link href="/write" className="btn btn-primary">
                 Start writing
               </Link>
               <Link href="/placement" className="btn">
                 Retake placement
+              </Link>
+              <Link href="/setup" className="btn">
+                Manage model
               </Link>
             </div>
           </div>
@@ -85,11 +109,11 @@ export default async function Home() {
             <ul className="flex flex-wrap gap-2">
               {weaknesses.map((w) => (
                 <li
-                  key={w.structure ?? "unknown"}
+                  key={w.structure}
                   className="text-sm px-3 py-1.5 rounded-full border border-white/10 bg-white/5"
                 >
                   <span className="text-[color:var(--foreground)]">{w.structure}</span>
-                  <span className="text-[color:var(--muted)] ml-2">×{w._count.structure}</span>
+                  <span className="text-[color:var(--muted)] ml-2">×{w.count}</span>
                 </li>
               ))}
             </ul>
@@ -120,12 +144,7 @@ export default async function Home() {
 
       <aside className="grid gap-6">
         <StatusPanel
-          profile={{
-            reading: profile.reading,
-            writing: profile.writing,
-            grammar: profile.grammar,
-            vocab: profile.vocab,
-          }}
+          profile={profile}
           title="Status · Afrikaans"
           subtitle={
             placed
@@ -136,10 +155,9 @@ export default async function Home() {
         <div className="panel p-5">
           <div className="kicker mb-2">How leveling works</div>
           <p className="text-sm text-[color:var(--muted)]">
-            Every prompt is also a measurement. Claude grades your writing, the
-            grade nudges your ability per skill, and your errors feed the next
-            prompt. Higher uncertainty → bigger steps. Stats converge as you
-            practice.
+            Every prompt is also a measurement. The on-device model grades your
+            writing, the grade nudges your ability per skill, and your errors
+            feed the next prompt. Everything stays on your device.
           </p>
         </div>
       </aside>

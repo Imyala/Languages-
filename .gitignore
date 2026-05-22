@@ -43,3 +43,9 @@ next-env.d.ts
 /src/generated/prisma
 /prisma/dev.db
 /prisma/dev.db-journal
+
+# generated service worker
+/public/sw.js
+/public/swe-worker-*.js
+/out
+
