@@ -4,11 +4,13 @@
 
 "use client";
 
-import {
-  CreateMLCEngine,
-  type MLCEngine,
-  type InitProgressReport,
-  type ChatCompletionRequestNonStreaming,
+// WebLLM is large (~6 MB). Import types statically (zero runtime cost) but
+// load the implementation only when ensureEngine() is called, via a dynamic
+// import. This keeps the WebLLM chunk off every initial page load.
+import type {
+  MLCEngine,
+  InitProgressReport,
+  ChatCompletionRequestNonStreaming,
 } from "@mlc-ai/web-llm";
 import { z } from "zod";
 import { cefrFor } from "./ability";
@@ -86,6 +88,9 @@ export async function ensureEngine(modelId: string = DEFAULT_MODEL_ID): Promise<
   if (loadingPromise && loadedModelId === modelId) return loadingPromise;
 
   loadedModelId = modelId;
+  // Dynamic import — webpack splits @mlc-ai/web-llm into its own chunk that
+  // only ships the first time the user clicks "Download & load".
+  const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
   loadingPromise = CreateMLCEngine(modelId, {
     initProgressCallback: (p) => emit(p),
   });

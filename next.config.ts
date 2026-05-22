@@ -9,8 +9,10 @@ const withSerwist = withSerwistInit({
   swDest: "public/sw.js",
   cacheOnNavigation: true,
   reloadOnOnline: true,
-  // The WebLLM runtime is ~6 MB; precache it so the app works fully offline.
-  maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
+  // Don't precache big chunks (WebLLM is ~5.7 MB) — they would saturate the
+  // user's connection on first visit. They load on demand and get cached via
+  // runtimeCaching the first time the user actually visits /setup or /write.
+  // Default Serwist limit (2 MB) is appropriate here.
   // Only register the SW in production builds.
   disable: process.env.NODE_ENV !== "production",
 });
