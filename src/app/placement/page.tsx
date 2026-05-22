@@ -39,6 +39,9 @@ type Phase =
 export default function PlacementPage() {
   const [state, setState] = useState<Phase>({ phase: "loading" });
   const started = useRef(false);
+  // Bank IDs the user has seen in any past placement session. Used to bias
+  // selection toward fresh items on retakes — strict cross-session novelty.
+  const discourageIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (started.current) return;
@@ -46,6 +49,13 @@ export default function PlacementPage() {
     (async () => {
       try {
         await getOrCreateProfile("af");
+
+        // Load all bank IDs the user has ever been served so we can avoid
+        // them on this run. Items still get reused if the bank runs out at
+        // the target difficulty — pickItemByDifficulty falls back gracefully.
+        const allPast = await db().placementItems.toArray();
+        discourageIds.current = new Set(allPast.map((i) => i.bankId));
+
         // Start a new session.
         const session: PlacementSession = {
           id: newId(),
@@ -58,7 +68,18 @@ export default function PlacementPage() {
         };
         await db().placementSessions.put(session);
 
-        const first = pickItemByDifficulty(30, new Set());
+        // Vary the starting difficulty a little on retakes so the first item
+        // isn't always the exact same point on the curve. First-timers (no
+        // past items) still start at the canonical ~A2.
+        const startTarget =
+          discourageIds.current.size === 0
+            ? 30
+            : 25 + Math.floor(Math.random() * 15); // 25–40
+        const first = pickItemByDifficulty(
+          startTarget,
+          new Set(),
+          discourageIds.current,
+        );
         if (!first) throw new Error("Placement bank empty");
         await db().placementItems.put({
           id: newId(),
@@ -161,7 +182,7 @@ export default function PlacementPage() {
         center || updated.grammar || 30,
         askedDifficulties,
       );
-      const next = pickItemByDifficulty(nextDifficulty, askedIds);
+      const next = pickItemByDifficulty(nextDifficulty, askedIds, discourageIds.current);
       if (!next) {
         const finalProfile = await updateProfile("af", { placed: true });
         setState({ phase: "done", profile: finalProfile });
