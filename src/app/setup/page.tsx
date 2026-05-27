@@ -9,13 +9,13 @@ export default function SetupPage() {
       <div>
         <div className="kicker mb-2">Setup</div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          On-device AI
+          Choose your mentor
         </h1>
         <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-          The writing-quest grader runs in your browser via WebGPU. Pick a model
-          below — first launch downloads the weights (one-time, ~1–2 GB) and
-          caches them. After that it works offline and your writing never leaves
-          your device.
+          Your in-app mentor reads, grades, and quests with you — fully on your
+          device. First launch downloads the chosen mentor (~1–3 GB, one time)
+          and caches it. After that it works offline and your writing never
+          leaves your device.
         </p>
       </div>
 
@@ -24,15 +24,15 @@ export default function SetupPage() {
       <div className="panel p-5 text-sm text-[color:var(--muted)] grid gap-2">
         <p>
           <span className="kicker mr-2">Heads up</span>
-          Quality is lower than a frontier cloud model. Small on-device models
-          can miss subtle Afrikaans-specific errors and occasionally produce
-          shaky JSON. We validate every response and retry; if grading fails,
-          you can try the same submission again.
+          Running entirely in your browser, the mentors are smaller than a
+          frontier cloud system — they can miss subtle Afrikaans-specific errors
+          and occasionally produce shaky structured output. Every response is
+          validated and auto-repaired; if a grading fails you can resubmit.
         </p>
         <p>
           <span className="kicker mr-2">Browser support</span>
-          WebGPU is required. Chrome / Edge on desktop and Android work today.
-          iOS Safari support is still experimental at the OS level.
+          Requires WebGPU. Chrome / Edge on desktop and Android work today. iOS
+          Safari support is still experimental at the OS level.
         </p>
       </div>
 

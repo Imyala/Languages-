@@ -16,40 +16,56 @@ import { cefrFor } from "./ability";
 // ---------------------------------------------------------------------------
 
 export type ModelPreset = {
+  // Internal WebLLM id; not user-visible.
   id: string;
+  // App-native name shown to the player.
   label: string;
+  // Short flavor tag shown in the picker.
+  tagline: string;
   description: string;
   approxSizeGB: number;
 };
 
+// Player-facing mentor tiers. The underlying open-source weights stay the same;
+// only the names change so the experience feels like part of the app rather
+// than an obvious wrapper around someone else's model.
 export const MODEL_PRESETS: ModelPreset[] = [
   {
     id: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-    label: "Llama 3.2 3B (default)",
-    description: "Balanced quality and speed. ~2.3 GB.",
+    label: "Mentor",
+    tagline: "Default — balanced for most players",
+    description: "Solid grader. Reasonable on a phone, sharp on a laptop. ~2.3 GB.",
     approxSizeGB: 2.3,
   },
   {
     id: "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-    label: "Qwen 2.5 3B (best multilingual)",
-    description: "Stronger on non-English; slightly larger. ~2.5 GB.",
+    label: "Polyglot",
+    tagline: "Strongest at Afrikaans nuance",
+    description: "Best non-English coverage. Slightly larger and slower. ~2.5 GB.",
     approxSizeGB: 2.5,
   },
   {
     id: "gemma-2-2b-it-q4f16_1-MLC",
-    label: "Gemma 2 2B (lighter)",
-    description: "Smaller, faster on phones. ~1.9 GB.",
+    label: "Scholar",
+    tagline: "Lighter — kinder to phones",
+    description: "Smaller download and snappier on mobile. ~1.9 GB.",
     approxSizeGB: 1.9,
   },
   {
     id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-    label: "Llama 3.2 1B (fastest)",
-    description: "Tiny + fast. Noticeably weaker grading. ~0.9 GB.",
+    label: "Apprentice",
+    tagline: "Fastest — but visibly weaker",
+    description: "Tiny and fast. Misses subtler Afrikaans errors. ~0.9 GB.",
     approxSizeGB: 0.9,
   },
 ];
 
 export const DEFAULT_MODEL_ID = MODEL_PRESETS[0].id;
+
+export function presetLabelFor(id: string | null): string {
+  if (!id) return "Mentor";
+  return MODEL_PRESETS.find((m) => m.id === id)?.label ?? "Mentor";
+}
 
 // ---------------------------------------------------------------------------
 // Engine singleton + progress events

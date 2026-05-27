@@ -259,10 +259,11 @@ export default function WritePage() {
         <div>
           <div className="kicker mb-2">One-time setup</div>
           <h1 className="text-xl font-semibold tracking-tight">
-            Download the grader to your browser.
+            Summon your mentor.
           </h1>
           <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-            Once cached, it stays on your device and works offline.
+            One-time download. Once cached, your mentor stays on your device and
+            works offline.
           </p>
         </div>
         <ModelLoader auto onReady={() => loadPrompt()} />
@@ -280,7 +281,7 @@ export default function WritePage() {
               <span>
                 {genTokens > 0
                   ? `${genTokens} tokens${genPhase === "repair" ? " · repair pass" : ""}`
-                  : "Warming up the model…"}
+                  : "Summoning your mentor…"}
               </span>
               <span>{formatDuration(genElapsedMs)} elapsed</span>
             </div>
@@ -294,7 +295,8 @@ export default function WritePage() {
               />
             </div>
             <p className="text-xs text-[color:var(--muted)]/70">
-              Phone CPUs typically take 20–60s. Each token tick means it&apos;s working.
+              Your mentor is drafting. Each token tick means it&apos;s working —
+              phone hardware typically lands in 20–60s.
             </p>
           </div>
         ) : (
@@ -382,8 +384,8 @@ export default function WritePage() {
               />
             </div>
             <p className="text-xs text-[color:var(--muted)]/70">
-              The on-device model is reading your text. Each token tick means
-              it&apos;s working — feedback drops as soon as the response is complete.
+              Your mentor is reading your text. Each token tick means it&apos;s
+              working — feedback drops as soon as the response is complete.
             </p>
           </div>
         ) : null}

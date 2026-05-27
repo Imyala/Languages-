@@ -7,6 +7,7 @@ import {
   ensureEngine,
   isModelReady,
   onProgress,
+  presetLabelFor,
 } from "@/lib/local-ai";
 import { getSetting, setSetting } from "@/lib/storage";
 
@@ -117,7 +118,7 @@ export function ModelLoader({
             className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
             style={{ background: "var(--good)", boxShadow: "0 0 8px var(--good)" }}
           />
-          Model loaded · <span className="font-mono text-[color:var(--muted)]">{modelId}</span>
+          {presetLabelFor(modelId)} ready
         </span>
       </div>
     );
@@ -126,12 +127,13 @@ export function ModelLoader({
   return (
     <div className="panel p-5 grid gap-4">
       <div>
-        <div className="kicker mb-1">On-device AI</div>
+        <div className="kicker mb-1">Mentor setup</div>
         <h3 className="text-lg font-semibold">
-          Download the model to your browser (one time)
+          Choose your in-app mentor
         </h3>
         <p className="text-sm text-[color:var(--muted)] mt-1">
-          Runs locally via WebGPU. After download it&apos;s cached and works offline.
+          Each mentor runs on your device (one-time download, ~1–3 GB).
+          Once cached, no internet needed.
         </p>
       </div>
 
@@ -151,7 +153,11 @@ export function ModelLoader({
                   ~{m.approxSizeGB.toFixed(1)} GB
                 </span>
               </div>
-              <div className="text-xs text-[color:var(--muted)] mt-1">{m.description}</div>
+              <div className="text-xs text-[color:var(--muted)] mt-1">
+                <span className="text-[color:var(--foreground)]/80">{m.tagline}</span>
+                <span className="mx-1.5 text-[color:var(--muted)]/60">·</span>
+                {m.description}
+              </div>
             </button>
           );
         })}
