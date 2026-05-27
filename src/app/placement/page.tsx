@@ -285,10 +285,16 @@ export default function PlacementPage() {
             }
             return (
               <button
-                key={idx}
+                // Keyed by the question's prompt so React mounts fresh DOM
+                // nodes on each new item and the previous button's focus /
+                // hover state can't carry over to the next question.
+                key={`${item.prompt}-${idx}`}
                 className={cls}
                 disabled={!!feedback || state.submitting}
-                onClick={() => answer(idx)}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  answer(idx);
+                }}
               >
                 {choice}
               </button>
