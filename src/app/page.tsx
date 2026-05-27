@@ -75,7 +75,7 @@ export default function Home() {
                 Start placement
               </Link>
               <Link href="/setup" className="btn">
-                Choose mentor
+                Choose onderwyser
               </Link>
             </div>
           </div>
@@ -97,7 +97,7 @@ export default function Home() {
                 Retake placement
               </Link>
               <Link href="/setup" className="btn">
-                Mentor
+                Onderwyser
               </Link>
             </div>
           </div>
@@ -155,8 +155,8 @@ export default function Home() {
         <div className="panel p-5">
           <div className="kicker mb-2">How leveling works</div>
           <p className="text-sm text-[color:var(--muted)]">
-            Every prompt is also a measurement. Your mentor grades each piece
-            of writing, the grade nudges your ability per skill, and your
+            Every prompt is also a measurement. Your onderwyser grades each
+            piece of writing, the grade nudges your ability per skill, and your
             errors feed the next prompt. Everything stays on your device.
           </p>
         </div>

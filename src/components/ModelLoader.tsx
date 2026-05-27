@@ -127,12 +127,12 @@ export function ModelLoader({
   return (
     <div className="panel p-5 grid gap-4">
       <div>
-        <div className="kicker mb-1">Mentor setup</div>
+        <div className="kicker mb-1">Kies jou onderwyser</div>
         <h3 className="text-lg font-semibold">
-          Choose your in-app mentor
+          Choose your in-app teacher
         </h3>
         <p className="text-sm text-[color:var(--muted)] mt-1">
-          Each mentor runs on your device (one-time download, ~1–3 GB).
+          Each one runs on your device (one-time download, ~1–3 GB).
           Once cached, no internet needed.
         </p>
       </div>
@@ -148,7 +148,12 @@ export function ModelLoader({
               onClick={() => setModelId(m.id)}
             >
               <div className="flex items-baseline justify-between gap-3">
-                <span className="font-medium">{m.label}</span>
+                <span className="font-medium">
+                  {m.label}
+                  <span className="ml-2 text-xs font-normal italic text-[color:var(--muted)]">
+                    {m.english}
+                  </span>
+                </span>
                 <span className="text-xs font-mono text-[color:var(--muted)]">
                   ~{m.approxSizeGB.toFixed(1)} GB
                 </span>

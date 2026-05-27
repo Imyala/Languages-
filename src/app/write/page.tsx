@@ -259,11 +259,11 @@ export default function WritePage() {
         <div>
           <div className="kicker mb-2">One-time setup</div>
           <h1 className="text-xl font-semibold tracking-tight">
-            Summon your mentor.
+            Pick your onderwyser.
           </h1>
           <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-            One-time download. Once cached, your mentor stays on your device and
-            works offline.
+            One-time download. Once cached, your teacher stays on your device
+            and works offline.
           </p>
         </div>
         <ModelLoader auto onReady={() => loadPrompt()} />
@@ -281,7 +281,7 @@ export default function WritePage() {
               <span>
                 {genTokens > 0
                   ? `${genTokens} tokens${genPhase === "repair" ? " · repair pass" : ""}`
-                  : "Summoning your mentor…"}
+                  : "Waking your onderwyser…"}
               </span>
               <span>{formatDuration(genElapsedMs)} elapsed</span>
             </div>
@@ -295,8 +295,8 @@ export default function WritePage() {
               />
             </div>
             <p className="text-xs text-[color:var(--muted)]/70">
-              Your mentor is drafting. Each token tick means it&apos;s working —
-              phone hardware typically lands in 20–60s.
+              Your onderwyser is drafting. Each token tick means it&apos;s
+              working — phone hardware typically lands in 20–60s.
             </p>
           </div>
         ) : (
@@ -384,8 +384,9 @@ export default function WritePage() {
               />
             </div>
             <p className="text-xs text-[color:var(--muted)]/70">
-              Your mentor is reading your text. Each token tick means it&apos;s
-              working — feedback drops as soon as the response is complete.
+              Your onderwyser is reading your text. Each token tick means
+              it&apos;s working — feedback drops as soon as the response is
+              complete.
             </p>
           </div>
         ) : null}

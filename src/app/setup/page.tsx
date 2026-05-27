@@ -9,13 +9,13 @@ export default function SetupPage() {
       <div>
         <div className="kicker mb-2">Setup</div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Choose your mentor
+          Kies jou onderwyser
         </h1>
         <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-          Your in-app mentor reads, grades, and quests with you — fully on your
-          device. First launch downloads the chosen mentor (~1–3 GB, one time)
-          and caches it. After that it works offline and your writing never
-          leaves your device.
+          Your in-app teacher reads, grades, and quests with you — fully on
+          your device. First launch downloads the chosen teacher (~1–3 GB, one
+          time) and caches it. After that it works offline and your writing
+          never leaves your device.
         </p>
       </div>
 
@@ -24,10 +24,11 @@ export default function SetupPage() {
       <div className="panel p-5 text-sm text-[color:var(--muted)] grid gap-2">
         <p>
           <span className="kicker mr-2">Heads up</span>
-          Running entirely in your browser, the mentors are smaller than a
-          frontier cloud system — they can miss subtle Afrikaans-specific errors
-          and occasionally produce shaky structured output. Every response is
-          validated and auto-repaired; if a grading fails you can resubmit.
+          Running entirely in your browser, every onderwyser is smaller than a
+          frontier cloud system — they can miss subtle Afrikaans-specific
+          errors and occasionally produce shaky structured output. Every
+          response is validated and auto-repaired; if a grading fails you can
+          resubmit.
         </p>
         <p>
           <span className="kicker mr-2">Browser support</span>

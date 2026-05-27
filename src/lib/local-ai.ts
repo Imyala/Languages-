@@ -18,42 +18,48 @@ import { cefrFor } from "./ability";
 export type ModelPreset = {
   // Internal WebLLM id; not user-visible.
   id: string;
-  // App-native name shown to the player.
+  // Afrikaans name shown to the player.
   label: string;
-  // Short flavor tag shown in the picker.
+  // English gloss — small subtitle so non-speakers know what it means.
+  english: string;
+  // One-line flavor pitch shown in the picker.
   tagline: string;
   description: string;
   approxSizeGB: number;
 };
 
-// Player-facing mentor tiers. The underlying open-source weights stay the same;
-// only the names change so the experience feels like part of the app rather
-// than an obvious wrapper around someone else's model.
+// Player-facing tiers, named in Afrikaans so the picker itself reinforces
+// vocabulary. Each name is a real Afrikaans word for a level of education.
+// Underlying weights are unchanged — only the labels change.
 export const MODEL_PRESETS: ModelPreset[] = [
   {
     id: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-    label: "Mentor",
+    label: "Onderwyser",
+    english: "teacher",
     tagline: "Default — balanced for most players",
-    description: "Solid grader. Reasonable on a phone, sharp on a laptop. ~2.3 GB.",
+    description: "Solid all-rounder. Reasonable on a phone, sharp on a laptop. ~2.3 GB.",
     approxSizeGB: 2.3,
   },
   {
     id: "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-    label: "Polyglot",
+    label: "Meester",
+    english: "master",
     tagline: "Strongest at Afrikaans nuance",
-    description: "Best non-English coverage. Slightly larger and slower. ~2.5 GB.",
+    description: "Best non-English coverage; the most demanding grader. ~2.5 GB.",
     approxSizeGB: 2.5,
   },
   {
     id: "gemma-2-2b-it-q4f16_1-MLC",
-    label: "Scholar",
+    label: "Skolier",
+    english: "pupil",
     tagline: "Lighter — kinder to phones",
     description: "Smaller download and snappier on mobile. ~1.9 GB.",
     approxSizeGB: 1.9,
   },
   {
     id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-    label: "Apprentice",
+    label: "Leerling",
+    english: "learner",
     tagline: "Fastest — but visibly weaker",
     description: "Tiny and fast. Misses subtler Afrikaans errors. ~0.9 GB.",
     approxSizeGB: 0.9,
@@ -63,8 +69,8 @@ export const MODEL_PRESETS: ModelPreset[] = [
 export const DEFAULT_MODEL_ID = MODEL_PRESETS[0].id;
 
 export function presetLabelFor(id: string | null): string {
-  if (!id) return "Mentor";
-  return MODEL_PRESETS.find((m) => m.id === id)?.label ?? "Mentor";
+  if (!id) return "Onderwyser";
+  return MODEL_PRESETS.find((m) => m.id === id)?.label ?? "Onderwyser";
 }
 
 // ---------------------------------------------------------------------------
