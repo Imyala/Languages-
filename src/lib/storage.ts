@@ -160,3 +160,33 @@ export async function getSetting(key: string): Promise<string | undefined> {
 export async function setSetting(key: string, value: string): Promise<void> {
   await db().settings.put({ key, value });
 }
+
+// Used by the chat tap-to-translate and the writing grader to record a
+// word the learner has chosen to keep. Upserts: bumps `uses` and
+// `lastUsed` if it already exists.
+export async function addToLexicon(language: string, lemma: string): Promise<void> {
+  const id = `${language}:${lemma.toLowerCase()}`;
+  const existing = await db().lexicon.get(id);
+  if (existing) {
+    await db().lexicon.put({
+      ...existing,
+      uses: existing.uses + 1,
+      lastUsed: Date.now(),
+    });
+  } else {
+    await db().lexicon.put({
+      id,
+      language,
+      lemma: lemma.toLowerCase(),
+      firstSeen: Date.now(),
+      lastUsed: Date.now(),
+      uses: 1,
+      mastery: 0.1,
+    });
+  }
+}
+
+export async function isInLexicon(language: string, lemma: string): Promise<boolean> {
+  const id = `${language}:${lemma.toLowerCase()}`;
+  return !!(await db().lexicon.get(id));
+}

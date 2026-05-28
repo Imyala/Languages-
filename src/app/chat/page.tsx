@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ModelLoader } from "@/components/ModelLoader";
+import { TappableText } from "@/components/TappableText";
+import { TranslationSheet } from "@/components/TranslationSheet";
 import { cefrFor } from "@/lib/ability";
 import {
   AbortedError,
@@ -25,8 +27,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [tappedWord, setTappedWord] = useState<string | null>(null);
   const initialized = useRef(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -75,22 +77,25 @@ export default function ChatPage() {
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, streamingText]);
+  }, [messages, streaming]);
 
   async function streamReply(history: ChatMessage[]) {
     if (!profile) return;
     setStreaming(true);
-    setStreamingText("");
     setError(null);
     try {
+      // We still pass the streaming callback so we can abort cleanly, but
+      // we no longer surface partial text — UI shows a typing-bubble until
+      // the full reply lands, then reveals it in one shot.
       const text = await chatTurn({
         scene,
         ability: profile.writing,
         history,
-        onToken: (acc) => setStreamingText(acc),
+        onToken: () => {
+          /* intentionally swallowed — typing dots are the only signal */
+        },
       });
       setMessages([...history, { role: "assistant", content: text }]);
-      setStreamingText("");
     } catch (e) {
       if (e instanceof AbortedError) {
         setError("Cancelled.");
@@ -247,14 +252,14 @@ export default function ChatPage() {
         {messages
           .filter((m) => !(m.role === "user" && m.content.startsWith("[Start the scene")))
           .map((m, i) => (
-            <Bubble key={i} role={m.role} text={m.content} />
+            <Bubble
+              key={i}
+              role={m.role}
+              text={m.content}
+              onTapWord={setTappedWord}
+            />
           ))}
-        {streaming && streamingText ? <Bubble role="assistant" text={streamingText} streaming /> : null}
-        {streaming && !streamingText ? (
-          <div className="mr-auto text-xs text-[color:var(--muted)] italic">
-            Onderwyser is thinking…
-          </div>
-        ) : null}
+        {streaming ? <TypingBubble /> : null}
         <div ref={threadEndRef} />
       </div>
 
@@ -287,6 +292,13 @@ export default function ChatPage() {
           <div className="text-xs text-[color:var(--bad)]">{error}</div>
         ) : null}
       </div>
+
+      {tappedWord ? (
+        <TranslationSheet
+          word={tappedWord}
+          onClose={() => setTappedWord(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -294,25 +306,37 @@ export default function ChatPage() {
 function Bubble({
   role,
   text,
-  streaming,
+  onTapWord,
 }: {
   role: "user" | "assistant";
   text: string;
-  streaming?: boolean;
+  onTapWord: (word: string) => void;
 }) {
   const isUser = role === "user";
   return (
     <div
-      className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap ${
+      className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
         isUser
           ? "ml-auto bg-[color:var(--accent)]/15 border border-[color:var(--accent)]/30"
           : "mr-auto bg-white/[0.04] border border-white/[0.06]"
       }`}
     >
-      {text}
-      {streaming ? (
-        <span className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-[color:var(--accent)] animate-pulse" />
-      ) : null}
+      <TappableText text={text} onTapWord={onTapWord} />
+    </div>
+  );
+}
+
+function TypingBubble() {
+  return (
+    <div
+      className="mr-auto px-4 py-3 rounded-2xl bg-white/[0.04] border border-white/[0.06]"
+      aria-label="Onderwyser is typing"
+    >
+      <span className="typing-dots">
+        <span className="dot" />
+        <span className="dot" />
+        <span className="dot" />
+      </span>
     </div>
   );
 }
