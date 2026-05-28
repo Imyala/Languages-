@@ -476,6 +476,22 @@ Grade it. Return only the JSON.`;
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
+export type ChatTurnResult = {
+  reply: string;
+  correction: { corrected: string; note: string } | null;
+};
+
+const ChatTurnSchema = z.object({
+  reply: z.string(),
+  correction: z
+    .object({
+      corrected: z.string(),
+      note: z.string(),
+    })
+    .nullable()
+    .default(null),
+});
+
 export const CHAT_SCENES: Array<{
   id: string;
   label: string;
@@ -524,14 +540,34 @@ function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): s
   return `You are an Afrikaans speaker chatting with someone who is learning Afrikaans.
 Scene: ${scene.systemSnippet}
 
-HARD RULES — these are not optional:
-- Reply ONLY in Afrikaans. Do NOT output any English words, sentences, translations, parenthetical glosses, or "(meaning ...)" notes. The learner taps individual words for translation in the UI; do not pre-translate.
-- Never write something like "(how are you?)" after an Afrikaans phrase.
-- If you cannot say something in Afrikaans, use a simpler Afrikaans phrase instead — do NOT switch to English.
-- Calibrate your vocabulary and sentence length to a CEFR ${band} learner. Shorter and simpler at A1/A2, fuller at B1+.
-- Keep each reply short: 1-3 sentences. End most replies with a question so the conversation flows.
-- Stay in character. Don't break out to explain grammar.
-- If the learner writes in English, gently nudge them back to Afrikaans, in Afrikaans.`;
+You MUST output a single JSON object. No prose around it, no markdown fences.
+
+Shape:
+{
+  "reply": "<your Afrikaans response, 1-3 sentences>",
+  "correction": null | { "corrected": "<the user's last message, rewritten correctly in Afrikaans>", "note": "<one short English line explaining the change>" }
+}
+
+Rules for "reply":
+- Always Afrikaans, never English. No translations, no parenthetical glosses.
+- Calibrate to CEFR ${band}: shorter & simpler at A1/A2, fuller at B1+.
+- 1-3 sentences. Stay in character. End most replies with a question.
+
+Rules for "correction":
+- Set to null if the user's last message has no real errors. Do not nitpick spacing, capitalization, or minor punctuation.
+- If there's a real grammar / word-order / vocab / spelling error, set "corrected" to the user's message rewritten correctly and "note" to one short English line.
+- If the user wrote in English (or mostly English), set "corrected" to the natural Afrikaans equivalent and "note" to "Try replying in Afrikaans next time."
+- If the user message is "[Start the scene. Greet me in Afrikaans.]" or anything in [brackets], set correction to null and just greet them.
+
+Examples:
+User: "Ek hou van koffie."
+{"reply": "Lekker! Wat is jou gunsteling koffie?", "correction": null}
+
+User: "Ek het gegaan na die winkel."
+{"reply": "Sjoe, wat het jy gekoop?", "correction": {"corrected": "Ek het na die winkel toe gegaan.", "note": "With directional 'na', the particle 'toe' usually goes at the end."}}
+
+User: "I went to the shop."
+{"reply": "Probeer in Afrikaans! Jy kan dit doen.", "correction": {"corrected": "Ek het na die winkel toe gegaan.", "note": "Try replying in Afrikaans next time."}}`;
 }
 
 // Models occasionally ignore the no-parens rule. Strip parenthetical text
@@ -550,33 +586,62 @@ export async function chatTurn(opts: {
   ability: number;
   history: ChatMessage[];
   onToken?: (textSoFar: string, tokenCount: number) => void;
-}): Promise<string> {
+}): Promise<ChatTurnResult> {
   abortFlag = false;
   const eng = await getActiveEngine();
-  const stream = await eng.chat.completions.create({
-    messages: [
-      { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
-      ...opts.history,
-    ],
-    temperature: 0.7,
-    max_tokens: 384,
-    stream: true,
-  });
-  let acc = "";
-  let tokens = 0;
-  for await (const chunk of stream as AsyncIterable<{
-    choices: Array<{ delta?: { content?: string } }>;
-  }>) {
+
+  const lastUser = [...opts.history].reverse().find((m) => m.role === "user");
+  const isOpener = lastUser?.content.startsWith("[Start the scene") ?? false;
+
+  async function streamOnce(asJson: boolean): Promise<string> {
+    const stream = await eng.chat.completions.create({
+      messages: [
+        { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
+        ...opts.history,
+      ],
+      temperature: 0.7,
+      max_tokens: 512,
+      ...(asJson ? { response_format: { type: "json_object" as const } } : {}),
+      stream: true,
+    });
+    let acc = "";
+    let tokens = 0;
+    for await (const chunk of stream as AsyncIterable<{
+      choices: Array<{ delta?: { content?: string } }>;
+    }>) {
+      if (abortFlag) throw new AbortedError();
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        acc += delta;
+        tokens += 1;
+        opts.onToken?.(acc, tokens);
+      }
+    }
     if (abortFlag) throw new AbortedError();
-    const delta = chunk.choices[0]?.delta?.content ?? "";
-    if (delta) {
-      acc += delta;
-      tokens += 1;
-      opts.onToken?.(acc, tokens);
+    return acc;
+  }
+
+  try {
+    const raw = await streamOnce(true);
+    const parsed = ChatTurnSchema.parse(parseJsonish(raw));
+    return {
+      reply: stripParentheticals(parsed.reply),
+      // Suppress corrections on the synthetic [Start the scene] opener.
+      correction: isOpener ? null : parsed.correction,
+    };
+  } catch (e) {
+    if (e instanceof AbortedError) throw e;
+    // Best-effort: if JSON parsing fails (small models occasionally do),
+    // treat the whole response as a plain Afrikaans reply with no
+    // correction so the chat keeps flowing.
+    try {
+      const rawText = await streamOnce(false);
+      return { reply: stripParentheticals(rawText), correction: null };
+    } catch (e2) {
+      if (e2 instanceof AbortedError) throw e2;
+      throw e;
     }
   }
-  if (abortFlag) throw new AbortedError();
-  return stripParentheticals(acc);
 }
 
 // Same ability-delta math as before.

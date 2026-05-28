@@ -16,20 +16,31 @@ import {
   onProgress,
   type ChatMessage,
 } from "@/lib/local-ai";
-import { db, getOrCreateProfile, type AbilityProfile } from "@/lib/storage";
+import {
+  db,
+  getOrCreateProfile,
+  type AbilityProfile,
+} from "@/lib/storage";
 
 type Stage = "loading-model" | "needs-model" | "scene" | "chatting";
+
+type ChatItem = ChatMessage & {
+  correction?: { corrected: string; note: string } | null;
+};
 
 export default function ChatPage() {
   const [stage, setStage] = useState<Stage>("scene");
   const [profile, setProfile] = useState<AbilityProfile | null>(null);
   const [scene, setScene] = useState(CHAT_SCENES[0]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatItem[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tappedWord, setTappedWord] = useState<string | null>(null);
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
+  const initialized = useRef(false);
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   async function reloadSavedWords() {
     const entries = await db().lexicon.where({ language: "af" }).toArray();
@@ -38,8 +49,6 @@ export default function ChatPage() {
   useEffect(() => {
     reloadSavedWords();
   }, []);
-  const initialized = useRef(false);
-  const threadEndRef = useRef<HTMLDivElement | null>(null);
 
   const stageRef = useRef<Stage>("scene");
   useEffect(() => {
@@ -51,7 +60,6 @@ export default function ChatPage() {
     setProfile(p);
     const s = stageRef.current;
     if (isModelReady()) {
-      // Don't yank the user out of an active chat.
       if (s === "chatting" || s === "scene") return;
       setStage("scene");
       return;
@@ -93,18 +101,30 @@ export default function ChatPage() {
     setStreaming(true);
     setError(null);
     try {
-      // We still pass the streaming callback so we can abort cleanly, but
-      // we no longer surface partial text — UI shows a typing-bubble until
-      // the full reply lands, then reveals it in one shot.
-      const text = await chatTurn({
+      const { reply, correction } = await chatTurn({
         scene,
         ability: profile.writing,
         history,
         onToken: () => {
-          /* intentionally swallowed — typing dots are the only signal */
+          /* swallowed — only typing dots show during generation */
         },
       });
-      setMessages([...history, { role: "assistant", content: text }]);
+
+      setMessages((prev) => {
+        // Attach the correction to the most recent user message so it
+        // renders right under that bubble in the thread.
+        const next: ChatItem[] = prev.map((m) => ({ ...m }));
+        if (correction) {
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].role === "user") {
+              next[i].correction = correction;
+              break;
+            }
+          }
+        }
+        next.push({ role: "assistant", content: reply });
+        return next;
+      });
     } catch (e) {
       if (e instanceof AbortedError) {
         setError("Cancelled.");
@@ -117,24 +137,28 @@ export default function ChatPage() {
   }
 
   function startScene() {
-    setMessages([]);
     setStage("chatting");
-    // Kick off the AI's opening line by sending an empty history with a
-    // tiny user nudge so the model knows to open the scene.
     const opener: ChatMessage = {
       role: "user",
       content: "[Start the scene. Greet me in Afrikaans.]",
     };
+    // Internal opener seeds the model with a turn to react to. The render
+    // filter below hides it from the visible thread.
+    setMessages([{ ...opener }]);
     streamReply([opener]);
   }
 
   function send() {
     const trimmed = input.trim();
     if (!trimmed || streaming) return;
-    const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
+    const userMsg: ChatItem = { role: "user", content: trimmed };
+    const next = [...messages, userMsg];
     setMessages(next);
     setInput("");
-    streamReply(next);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+    streamReply(next.map(({ role, content }) => ({ role, content })));
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -142,6 +166,13 @@ export default function ChatPage() {
       e.preventDefault();
       send();
     }
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }
 
   // ------------------------------------------------------------------ Stages
@@ -190,13 +221,11 @@ export default function ChatPage() {
       <div className="max-w-2xl mx-auto px-5 py-8 sm:py-12 grid gap-6">
         <div>
           <div className="kicker mb-2">Gesprek</div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Pick a scene
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Pick a scene</h1>
           <p className="text-[color:var(--muted)] mt-2 max-w-prose">
             Your onderwyser plays a role; you chat in Afrikaans. Calibrated to
-            your level ({profile ? cefrFor(profile.writing) : "A2"}). Reply in
-            Afrikaans — if you write English we&apos;ll nudge you back.
+            your level ({profile ? cefrFor(profile.writing) : "A2"}). If you
+            make a mistake we&apos;ll show how it should be corrected and why.
           </p>
         </div>
 
@@ -238,48 +267,62 @@ export default function ChatPage() {
     );
   }
 
-  // Chatting
-  return (
-    <div className="max-w-2xl mx-auto px-5 py-6 grid gap-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <div>
-          <div className="kicker">Scene</div>
-          <h2 className="text-lg font-semibold">{scene.label}</h2>
-        </div>
-        <button
-          className="btn"
-          onClick={() => {
-            if (streaming) abortCurrentGeneration();
-            setStage("scene");
-          }}
-        >
-          End chat
-        </button>
-      </div>
+  // ---- Chatting — full-viewport messaging layout ----
+  const visibleMessages = messages.filter(
+    (m) => !(m.role === "user" && m.content.startsWith("[Start the scene")),
+  );
 
-      <div className="panel p-3 grid gap-2 max-h-[50vh] overflow-y-auto">
-        {messages
-          .filter((m) => !(m.role === "user" && m.content.startsWith("[Start the scene")))
-          .map((m, i) => (
-            <Bubble
+  return (
+    <div
+      className="fixed left-0 right-0"
+      style={{
+        top: "45px",
+        bottom: "calc(58px + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      <div className="max-w-2xl mx-auto h-full flex flex-col">
+        {/* Compact scene header */}
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/5 shrink-0">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Scene
+            </div>
+            <h2 className="text-sm font-semibold truncate">{scene.label}</h2>
+          </div>
+          <button
+            className="btn text-xs px-3 py-1.5"
+            onClick={() => {
+              if (streaming) abortCurrentGeneration();
+              setStage("scene");
+            }}
+          >
+            End
+          </button>
+        </div>
+
+        {/* Messages — scrollable thread, always reachable. */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 grid auto-rows-max gap-1.5 content-start">
+          {visibleMessages.map((m, i) => (
+            <MessageItem
               key={i}
-              role={m.role}
-              text={m.content}
+              message={m}
               onTapWord={setTappedWord}
               savedWords={savedWords}
             />
           ))}
-        {streaming ? <TypingBubble /> : null}
-        <div ref={threadEndRef} />
-      </div>
+          {streaming ? <TypingBubble /> : null}
+          <div ref={threadEndRef} />
+        </div>
 
-      <div className="grid gap-2">
-        <div className="flex items-end gap-2">
+        {/* Input bar — pinned to bottom of the chat container, just above the
+            persistent bottom nav. */}
+        <div className="border-t border-white/5 px-2 py-2 flex items-end gap-2 shrink-0">
           <textarea
-            className="writing flex-1"
-            style={{ minHeight: 80 }}
+            ref={textareaRef}
+            className="chat-input flex-1"
+            rows={1}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={onKeyDown}
             placeholder="Tik in Afrikaans…"
             disabled={streaming}
@@ -293,13 +336,17 @@ export default function ChatPage() {
               className="btn btn-primary"
               onClick={send}
               disabled={!input.trim()}
+              aria-label="Send"
             >
               Send
             </button>
           )}
         </div>
+
         {error ? (
-          <div className="text-xs text-[color:var(--bad)]">{error}</div>
+          <div className="text-[11px] text-[color:var(--bad)] px-3 pb-1 shrink-0">
+            {error}
+          </div>
         ) : null}
       </div>
 
@@ -308,13 +355,53 @@ export default function ChatPage() {
           word={tappedWord}
           onClose={() => {
             setTappedWord(null);
-            // Refresh the saved-words set so newly-added words instantly
-            // lose the dotted underline.
             reloadSavedWords();
           }}
         />
       ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Message rendering
+// ---------------------------------------------------------------------------
+
+function MessageItem({
+  message,
+  onTapWord,
+  savedWords,
+}: {
+  message: ChatItem;
+  onTapWord: (word: string) => void;
+  savedWords: Set<string>;
+}) {
+  if (message.role === "user") {
+    return (
+      <div className="grid gap-1">
+        <Bubble
+          role="user"
+          text={message.content}
+          onTapWord={onTapWord}
+          savedWords={savedWords}
+        />
+        {message.correction ? (
+          <CorrectionCard
+            correction={message.correction}
+            onTapWord={onTapWord}
+            savedWords={savedWords}
+          />
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <Bubble
+      role="assistant"
+      text={message.content}
+      onTapWord={onTapWord}
+      savedWords={savedWords}
+    />
   );
 }
 
@@ -332,13 +419,41 @@ function Bubble({
   const isUser = role === "user";
   return (
     <div
-      className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+      className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
         isUser
           ? "ml-auto bg-[color:var(--accent)]/15 border border-[color:var(--accent)]/30"
           : "mr-auto bg-white/[0.04] border border-white/[0.06]"
       }`}
     >
       <TappableText text={text} onTapWord={onTapWord} savedWords={savedWords} />
+    </div>
+  );
+}
+
+function CorrectionCard({
+  correction,
+  onTapWord,
+  savedWords,
+}: {
+  correction: { corrected: string; note: string };
+  onTapWord: (word: string) => void;
+  savedWords: Set<string>;
+}) {
+  return (
+    <div className="ml-auto max-w-[85%] px-3 py-2 rounded-xl bg-[color:var(--accent)]/[0.06] border border-[color:var(--accent)]/25">
+      <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-[color:var(--accent)] mb-1">
+        Try
+      </div>
+      <div className="text-sm leading-snug text-[color:var(--foreground)]">
+        <TappableText
+          text={correction.corrected}
+          onTapWord={onTapWord}
+          savedWords={savedWords}
+        />
+      </div>
+      <p className="mt-1.5 text-[11px] text-[color:var(--muted)] italic">
+        {correction.note}
+      </p>
     </div>
   );
 }

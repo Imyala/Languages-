@@ -205,6 +205,30 @@ textarea.writing:focus {
   background: rgba(0, 0, 0, 0.35);
 }
 
+/* Chat input — auto-grow textarea on /chat. */
+textarea.chat-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+}
+textarea.chat-input:focus {
+  outline: none;
+  border-color: rgba(124, 140, 255, 0.45);
+  background: rgba(0, 0, 0, 0.4);
+}
+textarea.chat-input::placeholder {
+  color: var(--muted);
+}
+
 /* Tap-to-translate words inside chat bubbles. */
 .tappable-word {
   display: inline;
