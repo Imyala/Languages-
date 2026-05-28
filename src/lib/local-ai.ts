@@ -530,7 +530,14 @@ function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): s
 Scene: ${scene.systemSnippet}
 
 REPLY:
-1-3 sentences in pure Afrikaans. Stay in character. End most replies with a question. Never include English in the reply, never include parenthetical glosses.
+1-3 sentences in pure Afrikaans. Stay in character. End most replies with a question.
+
+ABSOLUTE RULES for the reply:
+- NEVER add English meta-commentary, narration, or framing.
+- NEVER start with phrases like "A natural Afrikaans version would be", "Here's how to say it in Afrikaans", "In Afrikaans:", "Translation:", "I would say:", "You could say:", "Sure, here's...", "Of course! Here's...".
+- NEVER wrap the reply in quotation marks of any kind (straight, smart, or French).
+- NEVER include parenthetical English glosses like "(meaning ...)" or "(i.e. ...)".
+- Just write your Afrikaans reply directly, in character, as if you were genuinely speaking to a friend.
 
 CORRECTION (only when the user clearly made a mistake):
 Only add a correction block if the user's last message has a CLEAR, UNAMBIGUOUS error that any Afrikaans teacher would mark wrong. If you are not certain, OMIT the block. False corrections damage the learner's trust.
@@ -609,7 +616,9 @@ function isTrivialCorrection(original: string, corrected: string): boolean {
 function parseChatResponse(raw: string): ChatTurnResult {
   const cleaned = stripParentheticals(raw);
   const split = cleaned.split(/\n\s*#{3,}\s*\n/);
-  const reply = split[0].trim();
+  // Apply stripMetaCommentary so any leading English narration or
+  // surrounding quotes the model added get cleaned out of the reply.
+  const reply = stripMetaCommentary(split[0]).trim();
   if (split.length < 2) return { reply, correction: null };
   const block = split.slice(1).join("\n");
   const correctedMatch = block.match(/CORRECTED\s*:\s*([^\n]+)/i);
@@ -633,6 +642,26 @@ function stripParentheticals(text: string): string {
     .replace(/\s+([,.!?;:])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Strip English meta-commentary the model occasionally puts before the
+// Afrikaans reply ("A natural Afrikaans version would be:", "Here's how
+// to say it in Afrikaans:", etc.) plus any surrounding quotation marks.
+// Conservative: only strips an opener up to a colon within the first 200
+// chars, so it can't accidentally eat genuine Afrikaans content.
+function stripMetaCommentary(text: string): string {
+  let s = text.trim();
+  const metaPattern =
+    /^(?:a (?:natural|good|proper|fluent) afrikaans|the afrikaans|in afrikaans|translation|i (?:would|might|could) say|here\s*['']?s (?:how|the|a)|sure\s*[!,]?\s*here|of course\s*[!,]?\s*here|you (?:could|might) say|let me)[^:\n]{0,180}:\s*/i;
+  s = s.replace(metaPattern, "");
+  // Also strip a leading "Translation:" / "In Afrikaans:" without a body.
+  s = s.replace(/^(?:translation|in afrikaans)\s*:\s*/i, "");
+  // Drop surrounding quotation marks of every common variety.
+  s = s
+    .replace(/^["'‘’“”«»„]+/gu, "")
+    .replace(/["'‘’“”«»„]+$/gu, "")
+    .trim();
+  return s;
 }
 
 export async function chatTurn(opts: {
