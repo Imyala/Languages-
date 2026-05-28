@@ -11,9 +11,11 @@ import {
   abortCurrentGeneration,
   chatTurn,
   CHAT_SCENES,
+  currentModelId,
   isModelLoading,
   isModelReady,
   onProgress,
+  presetLabelFor,
   type ChatMessage,
 } from "@/lib/local-ai";
 import {
@@ -228,6 +230,27 @@ export default function ChatPage() {
             make a mistake we&apos;ll show how it should be corrected and why.
           </p>
         </div>
+
+        {isModelReady() && currentModelId() !== "Qwen2.5-3B-Instruct-q4f16_1-MLC" ? (
+          <div className="panel p-3 text-xs text-[color:var(--muted)] flex items-baseline gap-2">
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full mt-1 shrink-0"
+              style={{ background: "var(--accent)" }}
+            />
+            <span>
+              Current teacher:{" "}
+              <strong className="text-[color:var(--foreground)]">
+                {presetLabelFor(currentModelId())}
+              </strong>
+              . For sharper Afrikaans corrections, switch to <strong>Meester</strong>{" "}
+              <span className="italic">(master)</span> in{" "}
+              <Link href="/setup" className="underline">
+                Profile → Onderwyser
+              </Link>
+              .
+            </span>
+          </div>
+        ) : null}
 
         <div className="grid gap-2">
           {CHAT_SCENES.map((s) => {

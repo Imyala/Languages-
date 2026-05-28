@@ -529,32 +529,78 @@ function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): s
   return `You are an Afrikaans speaker chatting with a CEFR ${band} learner.
 Scene: ${scene.systemSnippet}
 
-First, give your Afrikaans reply: 1-3 sentences, stay in character, end most replies with a question. Reply in Afrikaans only — never English, never parenthetical glosses.
+REPLY:
+1-3 sentences in pure Afrikaans. Stay in character. End most replies with a question. Never include English in the reply, never include parenthetical glosses.
 
-Then, IF AND ONLY IF the user's last message has a real error (grammar / word order / vocabulary / spelling, or it was accidentally in English), add a new line containing exactly "###", then on the next lines:
-CORRECTED: <user's message rewritten correctly in Afrikaans>
-WHY: <one short English sentence explaining>
+CORRECTION (only when the user clearly made a mistake):
+Only add a correction block if the user's last message has a CLEAR, UNAMBIGUOUS error that any Afrikaans teacher would mark wrong. If you are not certain, OMIT the block. False corrections damage the learner's trust.
 
-If the message is fine, or it is a synthetic [bracketed] system note, do NOT add the ### block at all.
-Do not nitpick spacing, capitalisation, or punctuation.
+DO correct things like:
+- Missing double negation ("Ek is nie moeg" → "Ek is nie moeg nie")
+- Wrong past tense form ("Ek het werk" → "Ek het gewerk")
+- V2 word-order violation ("Vandag ek gaan winkels toe" → "Vandag gaan ek winkels toe")
+- Wrong word entirely ("Ek het 'n boek skryf" → "Ek het 'n boek geskryf")
+- Mixing English mid-sentence ("Ek wil eat" → "Ek wil eet")
+- Whole message in English
 
-Example 1 — no error, no block:
+DO NOT correct things like:
+- Stylistic variations where multiple Afrikaans phrasings work
+- Word choice when both are acceptable
+- Sentences that are correct but informal or short
+- Missing capitalisation or punctuation
+- Spelling variations that are both accepted in modern Afrikaans
+- Anything you're unsure about
+
+FORMAT:
+After your Afrikaans reply, only when correcting, put a line that is just "###" then on the next lines:
+CORRECTED: <the user's message, rewritten correctly in Afrikaans>
+WHY: <one short English sentence explaining the change>
+
+Never add the block for synthetic system messages in [brackets].
+
+Example — no error, no block:
 User: Ek hou van koffie.
-Lekker! Wat is jou gunsteling soort koffie?
+Lekker! Watter soort hou jy van?
 
-Example 2 — real error, include block:
-User: Ek het gegaan na die winkel.
-Sjoe, wat het jy gekoop?
+Example — real V2 error, include block:
+User: Vandag ek gaan winkels toe.
+Sjoe, wat wil jy gaan koop?
 ###
-CORRECTED: Ek het na die winkel toe gegaan.
-WHY: With directional "na", the particle "toe" goes at the end.
+CORRECTED: Vandag gaan ek winkels toe.
+WHY: After a time word at the start, the verb stays in second position.
 
-Example 3 — wrote in English, include block:
+Example — past tense error, include block:
+User: Ek het my boek lees gister.
+Lekker! Watter boek was dit?
+###
+CORRECTED: Ek het gister my boek gelees.
+WHY: Past tense of "lees" is "gelees", and time adverbs come before the object.
+
+Example — wrote English, include block:
 User: I went to the shop.
-Probeer in Afrikaans! Jy kan dit doen.
+Probeer in Afrikaans, jy kan dit doen!
 ###
 CORRECTED: Ek het na die winkel toe gegaan.
 WHY: Try replying in Afrikaans next time.`;
+}
+
+// Reject "corrections" where the rewrite is essentially the same as the
+// original. Small models sometimes echo the user's sentence back with a
+// trivial change (whitespace, capitalisation, punctuation) and a vague
+// note — those aren't real corrections and they erode trust. We normalise
+// both sides and drop the block if they collapse to the same tokens.
+function isTrivialCorrection(original: string, corrected: string): boolean {
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      // Strip all non-letter characters (incl. accents kept).
+      .replace(/[^\p{L}\s]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const a = normalize(original);
+  const b = normalize(corrected);
+  if (!b) return true;
+  return a === b;
 }
 
 // Parse the model's plain-text response into reply + optional correction.
@@ -630,10 +676,17 @@ export async function chatTurn(opts: {
   if (abortFlag) throw new AbortedError();
 
   const parsed = parseChatResponse(acc);
+  let correction = parsed.correction;
+  // Drop trivial / hallucinated corrections so the user only sees real ones.
+  if (correction && lastUser) {
+    if (isTrivialCorrection(lastUser.content, correction.corrected)) {
+      correction = null;
+    }
+  }
   return {
     reply: parsed.reply,
     // Suppress corrections on the synthetic [Start the scene] opener.
-    correction: isOpener ? null : parsed.correction,
+    correction: isOpener ? null : correction,
   };
 }
 
