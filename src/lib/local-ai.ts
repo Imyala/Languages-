@@ -637,6 +637,73 @@ export async function chatTurn(opts: {
   };
 }
 
+// Single-word translation. Used as a fallback when the built-in
+// dictionary on /chat doesn't have a word. We keep it short, low
+// temperature, and tiny max_tokens so it completes in a few seconds
+// even on phone hardware, then cache the result so a second tap is
+// instant.
+export async function translateWord(word: string): Promise<string> {
+  abortFlag = false;
+  const eng = await getActiveEngine();
+  const stream = await eng.chat.completions.create({
+    messages: [
+      {
+        role: "system",
+        content:
+          "You translate single Afrikaans words into English. Reply with ONLY the English meaning. No quotes, no parentheticals, no explanation. Keep it under 8 words.",
+      },
+      { role: "user", content: `Translate this Afrikaans word: ${word}` },
+    ],
+    temperature: 0.1,
+    max_tokens: 32,
+    stream: true,
+  });
+  let acc = "";
+  for await (const chunk of stream as AsyncIterable<{
+    choices: Array<{ delta?: { content?: string } }>;
+  }>) {
+    if (abortFlag) throw new AbortedError();
+    const delta = chunk.choices[0]?.delta?.content ?? "";
+    if (delta) acc += delta;
+  }
+  if (abortFlag) throw new AbortedError();
+  return acc
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+const AI_TRANSLATION_CACHE_KEY = "aiTranslationCache";
+
+export async function getCachedTranslation(word: string): Promise<string | null> {
+  const raw = await getSetting(AI_TRANSLATION_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const cache = JSON.parse(raw) as Record<string, string>;
+    return cache[word.toLowerCase()] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedTranslation(
+  word: string,
+  translation: string,
+): Promise<void> {
+  const raw = await getSetting(AI_TRANSLATION_CACHE_KEY);
+  let cache: Record<string, string> = {};
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") cache = parsed;
+    } catch {
+      /* corrupt cache; start fresh */
+    }
+  }
+  cache[word.toLowerCase()] = translation;
+  await setSetting(AI_TRANSLATION_CACHE_KEY, JSON.stringify(cache));
+}
+
 // Same ability-delta math as before.
 export function deltasFromGrading(
   current: { writing: number; grammar: number; vocab: number },
