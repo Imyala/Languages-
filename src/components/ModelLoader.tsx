@@ -11,7 +11,7 @@ import {
 } from "@/lib/local-ai";
 import { getSetting, setSetting } from "@/lib/storage";
 
-type Status = "idle" | "loading" | "ready" | "error";
+type Status = "idle" | "confirming" | "loading" | "ready" | "error";
 
 export function ModelLoader({
   auto = false,
@@ -77,11 +77,12 @@ export function ModelLoader({
   }, [status, onReady]);
 
   useEffect(() => {
-    if (!auto || status !== "idle" || triggered.current) return;
+    // `auto` no longer auto-starts the download — that ate the chance to
+    // change selection. It just surfaces the picker without an extra click,
+    // and the user still has to confirm before any bytes hit the network.
+    if (!auto || triggered.current) return;
     triggered.current = true;
-    start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, status]);
+  }, [auto]);
 
   async function start() {
     if (status === "loading") return;
@@ -114,6 +115,11 @@ export function ModelLoader({
     return `${m}:${r.toString().padStart(2, "0")}`;
   }
 
+  const activePreset = MODEL_PRESETS.find((m) => m.id === modelId) ?? MODEL_PRESETS[0];
+  const activeLabel = activePreset.label;
+  const activeEnglish = activePreset.english;
+  const activeSize = activePreset.approxSizeGB;
+
   if (status === "ready") {
     return (
       <div className="panel p-4 text-sm flex items-center justify-between gap-3">
@@ -144,15 +150,21 @@ export function ModelLoader({
       <div className="grid gap-2">
         {MODEL_PRESETS.map((m) => {
           const selected = m.id === modelId;
+          // Cards stay tappable while the user is reviewing the confirmation —
+          // they can change their mind right up until "Yes, download".
+          const cardsDisabled = status === "loading";
           return (
             <button
               key={m.id}
               className={`choice ${selected ? "selected" : ""}`}
-              disabled={status === "loading"}
+              disabled={cardsDisabled}
               aria-pressed={selected}
               onClick={() => {
                 userPicked.current = true;
                 setModelId(m.id);
+                // If the user is mid-confirmation and re-taps, drop back to
+                // idle so the new confirmation reflects the new choice.
+                if (status === "confirming") setStatus("idle");
               }}
             >
               <div className="flex items-baseline justify-between gap-3">
@@ -185,6 +197,10 @@ export function ModelLoader({
 
       {status === "loading" ? (
         <div className="grid gap-2">
+          <div className="text-sm">
+            Downloading <strong>{activeLabel}</strong>{" "}
+            <span className="text-[color:var(--muted)]">({activeEnglish}, ~{activeSize.toFixed(1)} GB)</span>
+          </div>
           <div className="skill-bar">
             <div className="fill" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
@@ -208,10 +224,34 @@ export function ModelLoader({
             </div>
           ) : null}
         </div>
+      ) : status === "confirming" ? (
+        <div className="panel p-4 grid gap-3 border-[color:var(--accent)]/40">
+          <div>
+            <div className="kicker mb-1">Confirm</div>
+            <p className="text-sm">
+              Download <strong>{activeLabel}</strong>{" "}
+              <span className="text-[color:var(--muted)] italic">({activeEnglish})</span>{" "}
+              — about <strong>{activeSize.toFixed(1)} GB</strong>?
+            </p>
+            <p className="text-xs text-[color:var(--muted)] mt-1">
+              One-time download. Can take several minutes on a slow connection.
+              After it completes, your teacher stays on your device and works
+              offline.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button className="btn" onClick={() => setStatus("idle")}>
+              Pick different
+            </button>
+            <button className="btn btn-primary" onClick={start}>
+              Yes, download
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="flex gap-3">
-          <button className="btn btn-primary" onClick={start}>
-            Download &amp; load
+          <button className="btn btn-primary" onClick={() => setStatus("confirming")}>
+            Continue with {activeLabel}
           </button>
         </div>
       )}
