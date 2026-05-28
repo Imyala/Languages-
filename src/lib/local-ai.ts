@@ -168,6 +168,18 @@ export async function unloadEngine(): Promise<void> {
   }
 }
 
+// Returns whatever engine the user currently has — the one that's
+// already loaded, or the one they most recently chose (which is what
+// ModelAutoLoader will have started loading on boot). Never silently
+// forces the default; that would unload-and-reload a different teacher
+// every time chatTurn / gradeWriting runs and yank the user out of
+// their chat.
+async function getActiveEngine(): Promise<MLCEngine> {
+  if (engine) return engine;
+  const savedId = await getSetting("modelId");
+  return ensureEngine(savedId || DEFAULT_MODEL_ID);
+}
+
 // ---------------------------------------------------------------------------
 // Downloaded-model registry
 // ---------------------------------------------------------------------------
@@ -294,7 +306,7 @@ async function jsonChat<T>(opts: {
   onProgress?: (p: GenProgress) => void;
 }): Promise<T> {
   abortFlag = false;
-  const eng = await ensureEngine();
+  const eng = await getActiveEngine();
 
   async function streamOnce(
     messages: { role: "system" | "user" | "assistant"; content: string }[],
@@ -540,7 +552,7 @@ export async function chatTurn(opts: {
   onToken?: (textSoFar: string, tokenCount: number) => void;
 }): Promise<string> {
   abortFlag = false;
-  const eng = await ensureEngine();
+  const eng = await getActiveEngine();
   const stream = await eng.chat.completions.create({
     messages: [
       { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
