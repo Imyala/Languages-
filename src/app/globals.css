@@ -118,6 +118,11 @@ body {
 .choice:focus-visible { outline: 2px solid rgba(124, 140, 255, 0.6); outline-offset: 2px; }
 .choice.correct { background: rgba(110, 231, 183, 0.12); border-color: rgba(110, 231, 183, 0.45); }
 .choice.wrong { background: rgba(248, 113, 113, 0.10); border-color: rgba(248, 113, 113, 0.45); }
+.choice.selected {
+  background: linear-gradient(135deg, rgba(95, 216, 245, 0.16), rgba(124, 140, 255, 0.12));
+  border-color: rgba(95, 216, 245, 0.6);
+  box-shadow: 0 0 0 1px rgba(95, 216, 245, 0.35) inset, 0 0 20px -6px rgba(95, 216, 245, 0.4);
+}
 .choice[disabled] { cursor: default; }
 
 .kicker {

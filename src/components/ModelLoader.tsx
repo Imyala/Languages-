@@ -143,8 +143,9 @@ export function ModelLoader({
           return (
             <button
               key={m.id}
-              className={`choice ${selected ? "correct" : ""}`}
+              className={`choice ${selected ? "selected" : ""}`}
               disabled={status === "loading"}
+              aria-pressed={selected}
               onClick={() => setModelId(m.id)}
             >
               <div className="flex items-baseline justify-between gap-3">
@@ -154,8 +155,15 @@ export function ModelLoader({
                     {m.english}
                   </span>
                 </span>
-                <span className="text-xs font-mono text-[color:var(--muted)]">
-                  ~{m.approxSizeGB.toFixed(1)} GB
+                <span className="flex items-baseline gap-2">
+                  {selected ? (
+                    <span className="text-[10px] font-semibold tracking-[0.12em] text-[color:var(--accent)]">
+                      SELECTED
+                    </span>
+                  ) : null}
+                  <span className="text-xs font-mono text-[color:var(--muted)]">
+                    ~{m.approxSizeGB.toFixed(1)} GB
+                  </span>
                 </span>
               </div>
               <div className="text-xs text-[color:var(--muted)] mt-1">
