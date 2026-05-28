@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { SWUpdater } from "@/components/SWUpdater";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <SWUpdater />
         <header className="w-full border-b border-white/5">
           <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2 group">
