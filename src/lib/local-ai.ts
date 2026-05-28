@@ -481,17 +481,6 @@ export type ChatTurnResult = {
   correction: { corrected: string; note: string } | null;
 };
 
-const ChatTurnSchema = z.object({
-  reply: z.string(),
-  correction: z
-    .object({
-      corrected: z.string(),
-      note: z.string(),
-    })
-    .nullable()
-    .default(null),
-});
-
 export const CHAT_SCENES: Array<{
   id: string;
   label: string;
@@ -537,37 +526,56 @@ export const CHAT_SCENES: Array<{
 
 function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): string {
   const band = cefrFor(ability);
-  return `You are an Afrikaans speaker chatting with someone who is learning Afrikaans.
+  return `You are an Afrikaans speaker chatting with a CEFR ${band} learner.
 Scene: ${scene.systemSnippet}
 
-You MUST output a single JSON object. No prose around it, no markdown fences.
+First, give your Afrikaans reply: 1-3 sentences, stay in character, end most replies with a question. Reply in Afrikaans only — never English, never parenthetical glosses.
 
-Shape:
-{
-  "reply": "<your Afrikaans response, 1-3 sentences>",
-  "correction": null | { "corrected": "<the user's last message, rewritten correctly in Afrikaans>", "note": "<one short English line explaining the change>" }
+Then, IF AND ONLY IF the user's last message has a real error (grammar / word order / vocabulary / spelling, or it was accidentally in English), add a new line containing exactly "###", then on the next lines:
+CORRECTED: <user's message rewritten correctly in Afrikaans>
+WHY: <one short English sentence explaining>
+
+If the message is fine, or it is a synthetic [bracketed] system note, do NOT add the ### block at all.
+Do not nitpick spacing, capitalisation, or punctuation.
+
+Example 1 — no error, no block:
+User: Ek hou van koffie.
+Lekker! Wat is jou gunsteling soort koffie?
+
+Example 2 — real error, include block:
+User: Ek het gegaan na die winkel.
+Sjoe, wat het jy gekoop?
+###
+CORRECTED: Ek het na die winkel toe gegaan.
+WHY: With directional "na", the particle "toe" goes at the end.
+
+Example 3 — wrote in English, include block:
+User: I went to the shop.
+Probeer in Afrikaans! Jy kan dit doen.
+###
+CORRECTED: Ek het na die winkel toe gegaan.
+WHY: Try replying in Afrikaans next time.`;
 }
 
-Rules for "reply":
-- Always Afrikaans, never English. No translations, no parenthetical glosses.
-- Calibrate to CEFR ${band}: shorter & simpler at A1/A2, fuller at B1+.
-- 1-3 sentences. Stay in character. End most replies with a question.
-
-Rules for "correction":
-- Set to null if the user's last message has no real errors. Do not nitpick spacing, capitalization, or minor punctuation.
-- If there's a real grammar / word-order / vocab / spelling error, set "corrected" to the user's message rewritten correctly and "note" to one short English line.
-- If the user wrote in English (or mostly English), set "corrected" to the natural Afrikaans equivalent and "note" to "Try replying in Afrikaans next time."
-- If the user message is "[Start the scene. Greet me in Afrikaans.]" or anything in [brackets], set correction to null and just greet them.
-
-Examples:
-User: "Ek hou van koffie."
-{"reply": "Lekker! Wat is jou gunsteling koffie?", "correction": null}
-
-User: "Ek het gegaan na die winkel."
-{"reply": "Sjoe, wat het jy gekoop?", "correction": {"corrected": "Ek het na die winkel toe gegaan.", "note": "With directional 'na', the particle 'toe' usually goes at the end."}}
-
-User: "I went to the shop."
-{"reply": "Probeer in Afrikaans! Jy kan dit doen.", "correction": {"corrected": "Ek het na die winkel toe gegaan.", "note": "Try replying in Afrikaans next time."}}`;
+// Parse the model's plain-text response into reply + optional correction.
+// Tolerant: any "###" line on its own marks the start of the correction
+// block; missing or malformed blocks just yield correction = null.
+function parseChatResponse(raw: string): ChatTurnResult {
+  const cleaned = stripParentheticals(raw);
+  const split = cleaned.split(/\n\s*#{3,}\s*\n/);
+  const reply = split[0].trim();
+  if (split.length < 2) return { reply, correction: null };
+  const block = split.slice(1).join("\n");
+  const correctedMatch = block.match(/CORRECTED\s*:\s*([^\n]+)/i);
+  const whyMatch = block.match(/WHY\s*:\s*([^\n]+)/i);
+  if (!correctedMatch || !whyMatch) return { reply, correction: null };
+  return {
+    reply,
+    correction: {
+      corrected: correctedMatch[1].trim(),
+      note: whyMatch[1].trim(),
+    },
+  };
 }
 
 // Models occasionally ignore the no-parens rule. Strip parenthetical text
@@ -593,55 +601,40 @@ export async function chatTurn(opts: {
   const lastUser = [...opts.history].reverse().find((m) => m.role === "user");
   const isOpener = lastUser?.content.startsWith("[Start the scene") ?? false;
 
-  async function streamOnce(asJson: boolean): Promise<string> {
-    const stream = await eng.chat.completions.create({
-      messages: [
-        { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
-        ...opts.history,
-      ],
-      temperature: 0.7,
-      max_tokens: 512,
-      ...(asJson ? { response_format: { type: "json_object" as const } } : {}),
-      stream: true,
-    });
-    let acc = "";
-    let tokens = 0;
-    for await (const chunk of stream as AsyncIterable<{
-      choices: Array<{ delta?: { content?: string } }>;
-    }>) {
-      if (abortFlag) throw new AbortedError();
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      if (delta) {
-        acc += delta;
-        tokens += 1;
-        opts.onToken?.(acc, tokens);
-      }
-    }
+  // Plain-text streaming (no JSON mode) — grammar-constrained sampling
+  // roughly doubles per-token cost on small models, which made chat
+  // unusable on phones. We get the reply and the optional correction in
+  // one freeform pass and parse them apart by a "###" sentinel.
+  const stream = await eng.chat.completions.create({
+    messages: [
+      { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
+      ...opts.history,
+    ],
+    temperature: 0.7,
+    max_tokens: 256,
+    stream: true,
+  });
+  let acc = "";
+  let tokens = 0;
+  for await (const chunk of stream as AsyncIterable<{
+    choices: Array<{ delta?: { content?: string } }>;
+  }>) {
     if (abortFlag) throw new AbortedError();
-    return acc;
-  }
-
-  try {
-    const raw = await streamOnce(true);
-    const parsed = ChatTurnSchema.parse(parseJsonish(raw));
-    return {
-      reply: stripParentheticals(parsed.reply),
-      // Suppress corrections on the synthetic [Start the scene] opener.
-      correction: isOpener ? null : parsed.correction,
-    };
-  } catch (e) {
-    if (e instanceof AbortedError) throw e;
-    // Best-effort: if JSON parsing fails (small models occasionally do),
-    // treat the whole response as a plain Afrikaans reply with no
-    // correction so the chat keeps flowing.
-    try {
-      const rawText = await streamOnce(false);
-      return { reply: stripParentheticals(rawText), correction: null };
-    } catch (e2) {
-      if (e2 instanceof AbortedError) throw e2;
-      throw e;
+    const delta = chunk.choices[0]?.delta?.content ?? "";
+    if (delta) {
+      acc += delta;
+      tokens += 1;
+      opts.onToken?.(acc, tokens);
     }
   }
+  if (abortFlag) throw new AbortedError();
+
+  const parsed = parseChatResponse(acc);
+  return {
+    reply: parsed.reply,
+    // Suppress corrections on the synthetic [Start the scene] opener.
+    correction: isOpener ? null : parsed.correction,
+  };
 }
 
 // Same ability-delta math as before.
