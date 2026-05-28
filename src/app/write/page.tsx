@@ -8,12 +8,16 @@ import {
   AbortedError,
   abortCurrentGeneration,
   deltasFromGrading,
-  generateWritingPrompt,
   gradeWriting,
   isModelReady,
   type Grading,
   type WritingPrompt,
 } from "@/lib/local-ai";
+import {
+  getSeenWritingPromptIds,
+  markWritingPromptSeen,
+  pickWritingPrompt,
+} from "@/lib/writing-prompts";
 import {
   db,
   getOrCreateProfile,
@@ -91,8 +95,8 @@ export default function WritePage() {
   }, []);
 
   async function loadPrompt() {
-    beginGenerationTimer();
-    setStage("loading-prompt");
+    // No LLM call here — prompts are served instantly from a hand-curated
+    // bank. The model only runs when the user submits for grading.
     setError(null);
     try {
       const p = await getOrCreateProfile("af");
@@ -106,22 +110,27 @@ export default function WritePage() {
         .slice(0, 5)
         .map(([s]) => s);
 
-      const recentSubs = await db()
-        .writingSubmissions.where("language")
-        .equals("af")
-        .reverse()
-        .sortBy("createdAt");
-      const recentTopics = recentSubs.slice(0, 3).map((s) => s.promptText.slice(0, 80));
+      const seenIds = await getSeenWritingPromptIds();
+      const picked = pickWritingPrompt({
+        targetDifficulty: p.writing,
+        excludeIds: seenIds,
+        weaknessStructures: weaknesses,
+      });
+      if (!picked) {
+        setError("No writing prompts available at your level yet.");
+        setStage("writing");
+        return;
+      }
+      await markWritingPromptSeen(picked.id);
 
-      const fresh = await generateWritingPrompt(
-        { ability: p.writing, weaknesses, recentTopics },
-        {
-          onProgress: ({ tokens, phase }) => {
-            setGenTokens(tokens);
-            setGenPhase(phase);
-          },
-        },
-      );
+      // Translate the bank item into the WritingPrompt shape the grader uses.
+      const fresh: WritingPrompt = {
+        promptTextEnglish: picked.promptTextEnglish,
+        targetWordCount: picked.targetWordCount,
+        requiredStructures: picked.targetStructures,
+        modelAnswer: picked.modelAnswer,
+        encouragement: picked.encouragement ?? "",
+      };
       setPrompt(fresh);
       setText("");
       setGrading(null);
@@ -129,11 +138,7 @@ export default function WritePage() {
       setShowModel(false);
       setStage("writing");
     } catch (e) {
-      if (e instanceof AbortedError) {
-        setError("Cancelled. Try again or switch to a lighter teacher in Setup.");
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      setError(e instanceof Error ? e.message : String(e));
       setStage("writing");
     }
   }
@@ -289,35 +294,8 @@ export default function WritePage() {
     <div className="max-w-5xl mx-auto px-5 py-8 sm:py-12 grid gap-6 lg:grid-cols-3">
       <section className="lg:col-span-2 grid gap-6">
         {stage === "loading-prompt" || !prompt ? (
-          <div className="panel p-6 grid gap-3">
-            <div className="kicker">Generating a prompt at your level</div>
-            <div className="flex items-baseline justify-between gap-3 text-xs font-mono text-[color:var(--muted)]">
-              <span>
-                {genTokens > 0
-                  ? `${genTokens} tokens${genPhase === "repair" ? " · repair pass" : ""}`
-                  : "Waking your onderwyser…"}
-              </span>
-              <span>{formatDuration(genElapsedMs)} elapsed</span>
-            </div>
-            <div className="skill-bar">
-              {/* Token-count proxy: 1024 tokens is the cap for prompt gen. */}
-              <div
-                className="fill"
-                style={{
-                  width: `${Math.max(6, Math.min(100, Math.round((genTokens / 1024) * 100)))}%`,
-                }}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-[color:var(--muted)]/70 flex-1">
-                {genElapsedMs > 90000
-                  ? "Taking longer than expected. Cancel and try again, or pick a lighter teacher in Setup."
-                  : "Your onderwyser is drafting. Each token tick means it's working — phone hardware typically lands in 20–60s."}
-              </p>
-              <button className="btn" onClick={cancelGeneration}>
-                Cancel
-              </button>
-            </div>
+          <div className="panel p-6 text-sm text-[color:var(--muted)]">
+            Loading prompt…
           </div>
         ) : (
           <div className="panel panel-accent p-6">
