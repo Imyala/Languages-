@@ -2,168 +2,131 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { StatusPanel } from "@/components/StatusPanel";
 import { cefrFor } from "@/lib/ability";
 import {
   db,
   getOrCreateProfile,
   type AbilityProfile,
-  type WritingSubmission,
 } from "@/lib/storage";
 
-type WeaknessRow = { structure: string; count: number };
-
-export default function Home() {
+export default function LearnPage() {
   const [profile, setProfile] = useState<AbilityProfile | null>(null);
-  const [submissionCount, setSubmissionCount] = useState(0);
-  const [lexiconCount, setLexiconCount] = useState(0);
-  const [weaknesses, setWeaknesses] = useState<WeaknessRow[]>([]);
-  const [recent, setRecent] = useState<WritingSubmission[]>([]);
+  const [runs, setRuns] = useState(0);
+  const [words, setWords] = useState(0);
 
   useEffect(() => {
     (async () => {
       const p = await getOrCreateProfile("af");
       setProfile(p);
-      const dbi = db();
-      setSubmissionCount(await dbi.writingSubmissions.count());
-      setLexiconCount(await dbi.lexicon.where({ language: "af" }).count());
-      const tags = await dbi.errorTags.toArray();
-      const grouped = new Map<string, number>();
-      for (const t of tags) if (t.structure) grouped.set(t.structure, (grouped.get(t.structure) ?? 0) + 1);
-      setWeaknesses(
-        [...grouped.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([structure, count]) => ({ structure, count })),
-      );
-      const subs = await dbi.writingSubmissions
-        .where("language")
-        .equals("af")
-        .reverse()
-        .sortBy("createdAt");
-      setRecent(subs.slice(0, 4));
+      setRuns(await db().writingSubmissions.count());
+      setWords(await db().lexicon.where({ language: "af" }).count());
     })();
   }, []);
 
   if (!profile) {
     return (
-      <div className="max-w-3xl mx-auto px-5 py-16 text-center text-[color:var(--muted)]">
-        Loading your status…
+      <div className="max-w-md mx-auto px-5 py-16 text-center text-[color:var(--muted)]">
+        Loading…
       </div>
     );
   }
 
-  const placed = profile.placed;
-
-  return (
-    <div className="max-w-5xl mx-auto px-5 py-8 sm:py-12 grid gap-6 sm:grid-cols-3">
-      <section className="sm:col-span-2 grid gap-6">
-        {!placed ? (
-          <div className="panel p-6">
-            <div className="kicker mb-2">New player</div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Calibrate your starting stats.
-            </h1>
-            <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-              A short adaptive quiz — 12 items, branching difficulty. We use it to
-              place you on a real CEFR-aligned scale, then every writing session
-              keeps your stats honest from there. No streaks, no hearts. Just
-              writing that gets graded.
-            </p>
-            <div className="mt-5 flex gap-3 flex-wrap">
-              <Link href="/placement" className="btn btn-primary">
-                Start placement
-              </Link>
-              <Link href="/setup" className="btn">
-                Choose onderwyser
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div className="panel p-6">
-            <div className="kicker mb-2">Today&apos;s quest</div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Write at level {cefrFor(profile.writing)}.
-            </h1>
-            <p className="text-[color:var(--muted)] mt-2 max-w-prose">
-              Free-production writing in Afrikaans, graded on-device. Stats move
-              from real performance — not from streaks.
-            </p>
-            <div className="mt-5 flex gap-3 flex-wrap">
-              <Link href="/write" className="btn btn-primary">
-                Start writing
-              </Link>
-              <Link href="/chat" className="btn">
-                Chat
-              </Link>
-              <Link href="/placement" className="btn">
-                Retake placement
-              </Link>
-              <Link href="/setup" className="btn">
-                Onderwyser
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {placed && weaknesses.length > 0 ? (
-          <div className="panel p-6">
-            <div className="kicker mb-3">Weakness log · drives your next prompts</div>
-            <ul className="flex flex-wrap gap-2">
-              {weaknesses.map((w) => (
-                <li
-                  key={w.structure}
-                  className="text-sm px-3 py-1.5 rounded-full border border-white/10 bg-white/5"
-                >
-                  <span className="text-[color:var(--foreground)]">{w.structure}</span>
-                  <span className="text-[color:var(--muted)] ml-2">×{w.count}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        {placed && recent.length > 0 ? (
-          <div className="panel p-6">
-            <div className="kicker mb-3">Recent runs</div>
-            <ul className="grid gap-3">
-              {recent.map((r) => (
-                <li key={r.id} className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm text-[color:var(--foreground)] line-clamp-1">
-                    {r.promptText}
-                  </span>
-                  <span className="text-xs font-mono text-[color:var(--muted)] whitespace-nowrap">
-                    W {r.deltaWriting >= 0 ? "+" : ""}
-                    {r.deltaWriting.toFixed(1)} · G {r.deltaGrammar >= 0 ? "+" : ""}
-                    {r.deltaGrammar.toFixed(1)} · V {r.deltaVocab >= 0 ? "+" : ""}
-                    {r.deltaVocab.toFixed(1)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </section>
-
-      <aside className="grid gap-6">
-        <StatusPanel
-          profile={profile}
-          title="Status · Afrikaans"
-          subtitle={
-            placed
-              ? `${submissionCount} writing runs · ${lexiconCount} words in lexicon`
-              : "Not yet placed"
-          }
-        />
-        <div className="panel p-5">
-          <div className="kicker mb-2">How leveling works</div>
-          <p className="text-sm text-[color:var(--muted)]">
-            Every prompt is also a measurement. Your onderwyser grades each
-            piece of writing, the grade nudges your ability per skill, and your
-            errors feed the next prompt. Everything stays on your device.
+  // Onboarding gate: take placement first.
+  if (!profile.placed) {
+    return (
+      <div className="max-w-md mx-auto px-5 py-10 grid gap-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-semibold tracking-tight">Welcome</h1>
+          <p className="text-[color:var(--muted)] mt-2">
+            A short adaptive quiz puts you at the right level. About 5 minutes.
           </p>
         </div>
-      </aside>
+        <Link href="/placement" className="btn btn-primary py-4 text-base">
+          Start placement quiz
+        </Link>
+      </div>
+    );
+  }
+
+  const band = cefrFor(profile.writing);
+
+  return (
+    <div className="max-w-md mx-auto px-5 py-6 grid gap-4">
+      {/* Tiny pill at the top — level + stats at a glance. */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-[color:var(--muted)]">
+          Your level <span className="text-[color:var(--foreground)] font-semibold">{band}</span>
+        </span>
+        <span className="text-[color:var(--muted)]">
+          <span className="text-[color:var(--foreground)] font-semibold">{words}</span> words ·{" "}
+          <span className="text-[color:var(--foreground)] font-semibold">{runs}</span> lessons
+        </span>
+      </div>
+
+      {/* Primary action — Duolingo-style big "continue" button. */}
+      <Link
+        href="/write"
+        className="panel panel-accent p-6 grid gap-3 hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="kicker">Today&apos;s lesson</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">Writing</h2>
+            <p className="text-sm text-[color:var(--muted)] mt-1">
+              Free writing graded by your onderwyser. Adjusts to your level.
+            </p>
+          </div>
+          <ArrowRight />
+        </div>
+      </Link>
+
+      {/* Conversation practice. */}
+      <Link
+        href="/chat"
+        className="panel p-5 grid gap-2 hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Chat practice</h3>
+            <p className="text-sm text-[color:var(--muted)] mt-0.5">
+              Real back-and-forth conversations in Afrikaans.
+            </p>
+          </div>
+          <ArrowRight />
+        </div>
+      </Link>
+
+      {/* Coming-soon stubs so users can see what's planned. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="panel p-4 grid gap-1 opacity-60">
+          <div className="font-medium text-sm">Vocabulary</div>
+          <div className="text-[11px] text-[color:var(--muted)]">Soon</div>
+        </div>
+        <div className="panel p-4 grid gap-1 opacity-60">
+          <div className="font-medium text-sm">Sentence drills</div>
+          <div className="text-[11px] text-[color:var(--muted)]">Soon</div>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function ArrowRight() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-[color:var(--muted)]"
+      aria-hidden
+    >
+      <path d="M5 12h14" />
+      <path d="M13 5l7 7-7 7" />
+    </svg>
   );
 }

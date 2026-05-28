@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { BottomNav } from "@/components/BottomNav";
 import { SWUpdater } from "@/components/SWUpdater";
 import "./globals.css";
 
@@ -34,39 +35,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full flex flex-col">
         <SWUpdater />
         <header className="w-full border-b border-white/5">
-          <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between">
+          <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-center">
             <Link href="/" className="flex items-center gap-2 group">
               <span
                 className="inline-block w-2 h-2 rounded-full"
                 style={{ background: "var(--accent)", boxShadow: "0 0 12px var(--accent)" }}
               />
-              <span className="font-medium tracking-tight">
-                Gamer<span className="text-[color:var(--muted)]"> · Afrikaans</span>
-              </span>
+              <span className="font-medium tracking-tight text-sm">Afrikaans</span>
             </Link>
-            <nav className="flex items-center gap-3 text-sm">
-              <Link href="/" className="text-[color:var(--muted)] hover:text-white">
-                Status
-              </Link>
-              <Link href="/placement" className="text-[color:var(--muted)] hover:text-white">
-                Placement
-              </Link>
-              <Link href="/write" className="text-[color:var(--muted)] hover:text-white">
-                Write
-              </Link>
-              <Link href="/chat" className="text-[color:var(--muted)] hover:text-white">
-                Chat
-              </Link>
-              <Link href="/setup" className="text-[color:var(--muted)] hover:text-white">
-                Setup
-              </Link>
-            </nav>
           </div>
         </header>
         <main className="flex-1 w-full">{children}</main>
-        <footer className="w-full text-center text-xs text-[color:var(--muted)] py-6">
-          v0 · adaptive writing engine
-        </footer>
+        <BottomNav />
       </body>
     </html>
   );
