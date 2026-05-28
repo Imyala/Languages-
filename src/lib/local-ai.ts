@@ -10,6 +10,7 @@
 import type { MLCEngine, InitProgressReport } from "@mlc-ai/web-llm";
 import { z } from "zod";
 import { cefrFor } from "./ability";
+import { getSetting, setSetting } from "./storage";
 
 // ---------------------------------------------------------------------------
 // Model catalogue — surfaced in the UI as user-selectable presets.
@@ -105,6 +106,12 @@ export async function ensureEngine(modelId: string = DEFAULT_MODEL_ID): Promise<
   if (engine && loadedModelId === modelId) return engine;
   if (loadingPromise && loadedModelId === modelId) return loadingPromise;
 
+  // Switching teachers: unload the previously-loaded engine first so we
+  // don't double up on GPU memory.
+  if (engine && loadedModelId !== modelId) {
+    await unloadEngine();
+  }
+
   loadedModelId = modelId;
   // Dynamic import — webpack splits @mlc-ai/web-llm into its own chunk that
   // only ships the first time the user clicks "Download & load".
@@ -114,6 +121,7 @@ export async function ensureEngine(modelId: string = DEFAULT_MODEL_ID): Promise<
   });
   engine = await loadingPromise;
   loadingPromise = null;
+  await markModelDownloaded(modelId);
   return engine;
 }
 
@@ -126,6 +134,35 @@ export async function unloadEngine(): Promise<void> {
     }
     engine = null;
     loadedModelId = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Downloaded-model registry
+// ---------------------------------------------------------------------------
+// WebLLM caches model shards in the browser's Cache API but doesn't expose a
+// clean "which models are downloaded?" query. We track our own list in
+// IndexedDB and append after every successful ensureEngine — gives the
+// picker a "DOWNLOADED" badge to show without inspecting WebLLM internals.
+
+const DOWNLOADED_KEY = "downloadedModelIds";
+
+export async function getDownloadedModelIds(): Promise<string[]> {
+  const raw = await getSetting(DOWNLOADED_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function markModelDownloaded(id: string): Promise<void> {
+  const list = await getDownloadedModelIds();
+  if (!list.includes(id)) {
+    list.push(id);
+    await setSetting(DOWNLOADED_KEY, JSON.stringify(list));
   }
 }
 

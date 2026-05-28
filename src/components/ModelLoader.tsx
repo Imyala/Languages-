@@ -4,14 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_MODEL_ID,
   MODEL_PRESETS,
+  currentModelId,
   ensureEngine,
+  getDownloadedModelIds,
   isModelReady,
   onProgress,
-  presetLabelFor,
 } from "@/lib/local-ai";
 import { getSetting, setSetting } from "@/lib/storage";
 
-type Status = "idle" | "confirming" | "loading" | "ready" | "error";
+type Status = "idle" | "confirming" | "loading" | "error";
 
 export function ModelLoader({
   auto = false,
@@ -20,28 +21,38 @@ export function ModelLoader({
   auto?: boolean;
   onReady?: () => void;
 }) {
+  // The card the user has tapped on (which the bottom action operates on).
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL_ID);
-  const [status, setStatus] = useState<Status>(isModelReady() ? "ready" : "idle");
+  // The model the engine currently has loaded in memory (null = none).
+  const [activeId, setActiveId] = useState<string | null>(
+    isModelReady() ? currentModelId() : null,
+  );
+  // Set of model ids the user has previously downloaded (and which therefore
+  // live in the browser cache — switching to them is fast, no network).
+  const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
+
+  const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState<number>(0);
   const [progressText, setProgressText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  // Wall-clock timer state (ticks every second while loading, smooth)
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [smoothedEtaMs, setSmoothedEtaMs] = useState<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
-  const triggered = useRef(false);
-  // Set once the user has tapped a card — prevents the async load of the
-  // previously-saved choice from clobbering a fresh selection that landed
-  // first.
   const userPicked = useRef(false);
 
+  // Load saved selection + downloaded-model list on mount.
   useEffect(() => {
     (async () => {
-      const saved = await getSetting("modelId");
+      const [saved, downloaded] = await Promise.all([
+        getSetting("modelId"),
+        getDownloadedModelIds(),
+      ]);
       if (saved && !userPicked.current) setModelId(saved);
+      setDownloadedIds(new Set(downloaded));
     })();
   }, []);
 
+  // Subscribe to engine progress events.
   useEffect(() => {
     const off = onProgress((p) => {
       setProgress(p.progress ?? 0);
@@ -50,38 +61,36 @@ export function ModelLoader({
     return off;
   }, []);
 
-  // Tick once per second while loading so elapsed time advances smoothly,
-  // independent of WebLLM's chunk-by-chunk callbacks.
+  // Wall-clock elapsed during download.
   useEffect(() => {
     if (status !== "loading") return;
     if (startedAtRef.current == null) startedAtRef.current = Date.now();
     const id = setInterval(() => {
-      const t = Date.now() - (startedAtRef.current ?? Date.now());
-      setElapsedMs(t);
+      setElapsedMs(Date.now() - (startedAtRef.current ?? Date.now()));
     }, 1000);
     return () => clearInterval(id);
   }, [status]);
 
-  // Smooth the ETA via EMA so it doesn't jump every time a chunk lands.
+  // Smoothed ETA via EMA (alpha 0.15).
   useEffect(() => {
     if (status !== "loading" || progress <= 0.02 || elapsedMs < 2000) return;
     const projectedTotal = elapsedMs / progress;
     const rawRemaining = Math.max(0, projectedTotal - elapsedMs);
-    // EMA alpha 0.15 — heavy inertia so the ETA settles rather than jumping
-    // with every chunk. Trade-off: slower to react to real throughput changes.
-    setSmoothedEtaMs((prev) => (prev == null ? rawRemaining : prev * 0.85 + rawRemaining * 0.15));
+    setSmoothedEtaMs((prev) =>
+      prev == null ? rawRemaining : prev * 0.85 + rawRemaining * 0.15,
+    );
   }, [progress, elapsedMs, status]);
 
+  // Fire onReady whenever a model becomes active (initial load OR switch).
   useEffect(() => {
-    if (status === "ready") onReady?.();
-  }, [status, onReady]);
+    if (activeId) onReady?.();
+  }, [activeId, onReady]);
 
+  // The `auto` prop is informational only — it doesn't auto-start a download
+  // (which would deny the user any chance to confirm or pick a different
+  // teacher). It used to.
   useEffect(() => {
-    // `auto` no longer auto-starts the download — that ate the chance to
-    // change selection. It just surfaces the picker without an extra click,
-    // and the user still has to confirm before any bytes hit the network.
-    if (!auto || triggered.current) return;
-    triggered.current = true;
+    if (!auto) return;
   }, [auto]);
 
   async function start() {
@@ -101,11 +110,24 @@ export function ModelLoader({
       }
       await setSetting("modelId", modelId);
       await ensureEngine(modelId);
-      setStatus("ready");
+      setActiveId(modelId);
+      setDownloadedIds((prev) => {
+        const next = new Set(prev);
+        next.add(modelId);
+        return next;
+      });
+      setStatus("idle");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
     }
+  }
+
+  function cancelDownload() {
+    // Hard reload — the simplest way to truly halt an in-flight WebLLM
+    // download. Already-completed shards live in the Cache API and survive
+    // the reload, so the next attempt resumes from where this one stopped.
+    window.location.reload();
   }
 
   function formatDuration(ms: number): string {
@@ -116,42 +138,34 @@ export function ModelLoader({
   }
 
   const activePreset = MODEL_PRESETS.find((m) => m.id === modelId) ?? MODEL_PRESETS[0];
-  const activeLabel = activePreset.label;
-  const activeEnglish = activePreset.english;
-  const activeSize = activePreset.approxSizeGB;
+  const isSelectedDownloaded = downloadedIds.has(modelId);
+  const isSelectedActive = activeId === modelId;
 
-  if (status === "ready") {
-    return (
-      <div className="panel p-4 text-sm flex items-center justify-between gap-3">
-        <span>
-          <span
-            className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
-            style={{ background: "var(--good)", boxShadow: "0 0 8px var(--good)" }}
-          />
-          {presetLabelFor(modelId)} ready
-        </span>
-      </div>
-    );
-  }
+  // The verb / question that shapes the primary button + confirm copy
+  // depending on whether the chosen card is brand-new, cached, or already
+  // running.
+  const actionKind: "active" | "switch" | "download" = isSelectedActive
+    ? "active"
+    : isSelectedDownloaded
+      ? "switch"
+      : "download";
 
   return (
     <div className="panel p-5 grid gap-4">
       <div>
         <div className="kicker mb-1">Kies jou onderwyser</div>
-        <h3 className="text-lg font-semibold">
-          Choose your in-app teacher
-        </h3>
+        <h3 className="text-lg font-semibold">Choose your in-app teacher</h3>
         <p className="text-sm text-[color:var(--muted)] mt-1">
-          Each one runs on your device (one-time download, ~1–3 GB).
-          Once cached, no internet needed.
+          Tap a teacher to inspect. Each one runs on your device (one-time
+          download, ~1–3 GB) and stays cached so you can switch any time.
         </p>
       </div>
 
       <div className="grid gap-2">
         {MODEL_PRESETS.map((m) => {
           const selected = m.id === modelId;
-          // Cards stay tappable while the user is reviewing the confirmation —
-          // they can change their mind right up until "Yes, download".
+          const downloaded = downloadedIds.has(m.id);
+          const active = activeId === m.id;
           const cardsDisabled = status === "loading";
           return (
             <button
@@ -162,12 +176,12 @@ export function ModelLoader({
               onClick={() => {
                 userPicked.current = true;
                 setModelId(m.id);
-                // If the user is mid-confirmation and re-taps, drop back to
-                // idle so the new confirmation reflects the new choice.
+                // If user re-picks while a confirm is up, drop back to idle so
+                // the next confirm reflects the new choice.
                 if (status === "confirming") setStatus("idle");
               }}
             >
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
                 <span className="font-medium">
                   {m.label}
                   <span className="ml-2 text-xs font-normal italic text-[color:var(--muted)]">
@@ -175,7 +189,16 @@ export function ModelLoader({
                   </span>
                 </span>
                 <span className="flex items-baseline gap-2">
-                  {selected ? (
+                  {active ? (
+                    <span className="text-[10px] font-semibold tracking-[0.12em] text-[color:var(--good)]">
+                      ACTIVE
+                    </span>
+                  ) : downloaded ? (
+                    <span className="text-[10px] font-semibold tracking-[0.12em] text-[color:var(--muted)]">
+                      DOWNLOADED
+                    </span>
+                  ) : null}
+                  {selected && !active ? (
                     <span className="text-[10px] font-semibold tracking-[0.12em] text-[color:var(--accent)]">
                       SELECTED
                     </span>
@@ -196,10 +219,13 @@ export function ModelLoader({
       </div>
 
       {status === "loading" ? (
-        <div className="grid gap-2">
+        <div className="grid gap-3">
           <div className="text-sm">
-            Downloading <strong>{activeLabel}</strong>{" "}
-            <span className="text-[color:var(--muted)]">({activeEnglish}, ~{activeSize.toFixed(1)} GB)</span>
+            {downloadedIds.has(modelId) ? "Loading" : "Downloading"}{" "}
+            <strong>{activePreset.label}</strong>{" "}
+            <span className="text-[color:var(--muted)]">
+              ({activePreset.english}, ~{activePreset.approxSizeGB.toFixed(1)} GB)
+            </span>
           </div>
           <div className="skill-bar">
             <div className="fill" style={{ width: `${Math.round(progress * 100)}%` }} />
@@ -223,35 +249,75 @@ export function ModelLoader({
               {progressText}
             </div>
           ) : null}
+          <div className="flex items-center justify-between gap-3 mt-1">
+            <p className="text-xs text-[color:var(--muted)]/70 flex-1">
+              Cancelling stops the download. Parts already on your device are
+              kept, so resuming later picks up where you left off.
+            </p>
+            <button className="btn" onClick={cancelDownload}>
+              Cancel
+            </button>
+          </div>
         </div>
       ) : status === "confirming" ? (
         <div className="panel p-4 grid gap-3 border-[color:var(--accent)]/40">
           <div>
             <div className="kicker mb-1">Confirm</div>
-            <p className="text-sm">
-              Download <strong>{activeLabel}</strong>{" "}
-              <span className="text-[color:var(--muted)] italic">({activeEnglish})</span>{" "}
-              — about <strong>{activeSize.toFixed(1)} GB</strong>?
-            </p>
-            <p className="text-xs text-[color:var(--muted)] mt-1">
-              One-time download. Can take several minutes on a slow connection.
-              After it completes, your teacher stays on your device and works
-              offline.
-            </p>
+            {actionKind === "switch" ? (
+              <>
+                <p className="text-sm">
+                  Switch to <strong>{activePreset.label}</strong>{" "}
+                  <span className="text-[color:var(--muted)] italic">
+                    ({activePreset.english})
+                  </span>
+                  ?
+                </p>
+                <p className="text-xs text-[color:var(--muted)] mt-1">
+                  Already on your device. Switching unloads the current teacher
+                  and loads this one — no download needed.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm">
+                  Download <strong>{activePreset.label}</strong>{" "}
+                  <span className="text-[color:var(--muted)] italic">
+                    ({activePreset.english})
+                  </span>{" "}
+                  — about <strong>{activePreset.approxSizeGB.toFixed(1)} GB</strong>?
+                </p>
+                <p className="text-xs text-[color:var(--muted)] mt-1">
+                  One-time download. Can take several minutes on a slow
+                  connection. You can cancel mid-download — already-saved
+                  parts are kept.
+                </p>
+              </>
+            )}
           </div>
           <div className="flex gap-3">
             <button className="btn" onClick={() => setStatus("idle")}>
               Pick different
             </button>
             <button className="btn btn-primary" onClick={start}>
-              Yes, download
+              {actionKind === "switch" ? "Yes, switch" : "Yes, download"}
             </button>
           </div>
+        </div>
+      ) : actionKind === "active" ? (
+        <div className="text-sm text-[color:var(--muted)] flex items-center gap-2">
+          <span
+            className="inline-block w-2 h-2 rounded-full"
+            style={{ background: "var(--good)", boxShadow: "0 0 8px var(--good)" }}
+          />
+          <strong className="text-[color:var(--foreground)]">{activePreset.label}</strong>
+          is active. Tap another teacher above to switch or add a new one.
         </div>
       ) : (
         <div className="flex gap-3">
           <button className="btn btn-primary" onClick={() => setStatus("confirming")}>
-            Continue with {activeLabel}
+            {actionKind === "switch"
+              ? `Switch to ${activePreset.label}`
+              : `Download ${activePreset.label}`}
           </button>
         </div>
       )}
