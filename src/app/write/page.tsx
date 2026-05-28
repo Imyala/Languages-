@@ -9,7 +9,9 @@ import {
   abortCurrentGeneration,
   deltasFromGrading,
   gradeWriting,
+  isModelLoading,
   isModelReady,
+  onProgress,
   type Grading,
   type WritingPrompt,
 } from "@/lib/local-ai";
@@ -28,6 +30,7 @@ import {
 
 type Stage =
   | "needs-placement"
+  | "loading-model"
   | "needs-model"
   | "loading-prompt"
   | "writing"
@@ -76,23 +79,57 @@ export default function WritePage() {
     return `${m}:${r.toString().padStart(2, "0")}`;
   }
 
+  // Stage-stable ref so the global state-change handler can read the
+  // current stage without re-binding on every transition.
+  const stageRef = useRef<Stage>("loading-prompt");
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
+
+  async function reconcile() {
+    const p = await getOrCreateProfile("af");
+    setProfile(p);
+    if (!p.placed) {
+      setStage("needs-placement");
+      return;
+    }
+    if (isModelReady()) {
+      // Don't restart a writing session if the user is already mid-flow.
+      const s = stageRef.current;
+      if (s === "writing" || s === "grading" || s === "graded") return;
+      await loadPrompt();
+      return;
+    }
+    if (isModelLoading()) {
+      setStage("loading-model");
+      return;
+    }
+    setStage("needs-model");
+  }
+
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    (async () => {
-      const p = await getOrCreateProfile("af");
-      setProfile(p);
-      if (!p.placed) {
-        setStage("needs-placement");
-        return;
-      }
-      if (!isModelReady()) {
-        setStage("needs-model");
-        return;
-      }
-      await loadPrompt();
-    })();
+    reconcile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // React to engine state changes broadcast from local-ai (auto-loader
+  // finishing, manual load, unload, etc).
+  useEffect(() => {
+    const handler = () => reconcile();
+    window.addEventListener("gl:model-state-change", handler);
+    return () => window.removeEventListener("gl:model-state-change", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror auto-loader / manual-load progress into the loading-model panel.
+  const [autoLoadProgress, setAutoLoadProgress] = useState(0);
+  useEffect(() => {
+    if (stage !== "loading-model") return;
+    const off = onProgress((p) => setAutoLoadProgress(p.progress ?? 0));
+    return off;
+  }, [stage]);
 
   async function loadPrompt() {
     // No LLM call here — prompts are served instantly from a hand-curated
@@ -267,6 +304,27 @@ export default function WritePage() {
               Start placement
             </Link>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === "loading-model") {
+    return (
+      <div className="max-w-md mx-auto px-5 py-10 grid gap-4">
+        <div>
+          <div className="kicker mb-2">Waking your teacher</div>
+          <h1 className="text-lg font-semibold">Loading your onderwyser…</h1>
+          <p className="text-sm text-[color:var(--muted)] mt-1">
+            Already on your device. We&apos;re reading it into memory — usually
+            10–30 seconds.
+          </p>
+        </div>
+        <div className="skill-bar">
+          <div
+            className="fill"
+            style={{ width: `${Math.max(8, Math.round(autoLoadProgress * 100))}%` }}
+          />
         </div>
       </div>
     );

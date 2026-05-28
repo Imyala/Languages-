@@ -263,7 +263,7 @@ export function ModelLoader({
         <div className="panel p-4 grid gap-3 border-[color:var(--accent)]/40">
           <div>
             <div className="kicker mb-1">Confirm</div>
-            {actionKind === "switch" ? (
+            {actionKind === "switch" && activeId ? (
               <>
                 <p className="text-sm">
                   Switch to <strong>{activePreset.label}</strong>{" "}
@@ -273,8 +273,22 @@ export function ModelLoader({
                   ?
                 </p>
                 <p className="text-xs text-[color:var(--muted)] mt-1">
-                  Already on your device. Switching unloads the current teacher
-                  and loads this one — no download needed.
+                  The current teacher will be unloaded but stays on your
+                  device — no download needed for either.
+                </p>
+              </>
+            ) : actionKind === "switch" ? (
+              <>
+                <p className="text-sm">
+                  Load <strong>{activePreset.label}</strong>{" "}
+                  <span className="text-[color:var(--muted)] italic">
+                    ({activePreset.english})
+                  </span>
+                  ?
+                </p>
+                <p className="text-xs text-[color:var(--muted)] mt-1">
+                  Already on your device. Loads in a few seconds — no
+                  download needed.
                 </p>
               </>
             ) : (
@@ -299,7 +313,11 @@ export function ModelLoader({
               Pick different
             </button>
             <button className="btn btn-primary" onClick={start}>
-              {actionKind === "switch" ? "Yes, switch" : "Yes, download"}
+              {actionKind === "switch"
+                ? activeId
+                  ? "Yes, switch"
+                  : "Yes, load"
+                : "Yes, download"}
             </button>
           </div>
         </div>
@@ -316,7 +334,9 @@ export function ModelLoader({
         <div className="flex gap-3">
           <button className="btn btn-primary" onClick={() => setStatus("confirming")}>
             {actionKind === "switch"
-              ? `Switch to ${activePreset.label}`
+              ? activeId
+                ? `Switch to ${activePreset.label}`
+                : `Use ${activePreset.label}`
               : `Download ${activePreset.label}`}
           </button>
         </div>

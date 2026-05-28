@@ -98,13 +98,39 @@ export function isModelReady(): boolean {
   return engine !== null;
 }
 
+export function isModelLoading(): boolean {
+  return loadingPromise !== null;
+}
+
 export function currentModelId(): string | null {
   return loadedModelId;
 }
 
+// Components on /write and /chat listen for this to know when the
+// background auto-loader has finished its job (or a manual load
+// completes), so they can transition out of waiting/picker states
+// without polling.
+function emitModelStateChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("gl:model-state-change"));
+}
+
 export async function ensureEngine(modelId: string = DEFAULT_MODEL_ID): Promise<MLCEngine> {
+  // Fast paths.
   if (engine && loadedModelId === modelId) return engine;
   if (loadingPromise && loadedModelId === modelId) return loadingPromise;
+
+  // A different model is already mid-load (e.g. the app-boot auto-loader is
+  // still running while the user taps to switch). Wait it out so we don't
+  // trample on each other's state, then re-check.
+  if (loadingPromise) {
+    try {
+      await loadingPromise;
+    } catch {
+      /* ignore — we'll start fresh below */
+    }
+    if (engine && loadedModelId === modelId) return engine;
+  }
 
   // Switching teachers: unload the previously-loaded engine first so we
   // don't double up on GPU memory.
@@ -114,14 +140,18 @@ export async function ensureEngine(modelId: string = DEFAULT_MODEL_ID): Promise<
 
   loadedModelId = modelId;
   // Dynamic import — webpack splits @mlc-ai/web-llm into its own chunk that
-  // only ships the first time the user clicks "Download & load".
+  // only ships the first time we actually need it.
   const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
   loadingPromise = CreateMLCEngine(modelId, {
     initProgressCallback: (p) => emit(p),
   });
-  engine = await loadingPromise;
-  loadingPromise = null;
+  try {
+    engine = await loadingPromise;
+  } finally {
+    loadingPromise = null;
+  }
   await markModelDownloaded(modelId);
+  emitModelStateChange();
   return engine;
 }
 
@@ -134,6 +164,7 @@ export async function unloadEngine(): Promise<void> {
     }
     engine = null;
     loadedModelId = null;
+    emitModelStateChange();
   }
 }
 

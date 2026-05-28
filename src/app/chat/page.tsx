@@ -9,12 +9,14 @@ import {
   abortCurrentGeneration,
   chatTurn,
   CHAT_SCENES,
+  isModelLoading,
   isModelReady,
+  onProgress,
   type ChatMessage,
 } from "@/lib/local-ai";
 import { getOrCreateProfile, type AbilityProfile } from "@/lib/storage";
 
-type Stage = "needs-model" | "scene" | "chatting";
+type Stage = "loading-model" | "needs-model" | "scene" | "chatting";
 
 export default function ChatPage() {
   const [stage, setStage] = useState<Stage>("scene");
@@ -28,15 +30,48 @@ export default function ChatPage() {
   const initialized = useRef(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
 
+  const stageRef = useRef<Stage>("scene");
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
+
+  async function reconcile() {
+    const p = await getOrCreateProfile("af");
+    setProfile(p);
+    const s = stageRef.current;
+    if (isModelReady()) {
+      // Don't yank the user out of an active chat.
+      if (s === "chatting" || s === "scene") return;
+      setStage("scene");
+      return;
+    }
+    if (isModelLoading()) {
+      setStage("loading-model");
+      return;
+    }
+    setStage("needs-model");
+  }
+
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    (async () => {
-      const p = await getOrCreateProfile("af");
-      setProfile(p);
-      if (!isModelReady()) setStage("needs-model");
-    })();
+    reconcile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const handler = () => reconcile();
+    window.addEventListener("gl:model-state-change", handler);
+    return () => window.removeEventListener("gl:model-state-change", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [autoLoadProgress, setAutoLoadProgress] = useState(0);
+  useEffect(() => {
+    if (stage !== "loading-model") return;
+    const off = onProgress((p) => setAutoLoadProgress(p.progress ?? 0));
+    return off;
+  }, [stage]);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -96,6 +131,27 @@ export default function ChatPage() {
   }
 
   // ------------------------------------------------------------------ Stages
+
+  if (stage === "loading-model") {
+    return (
+      <div className="max-w-md mx-auto px-5 py-10 grid gap-4">
+        <div>
+          <div className="kicker mb-2">Waking your teacher</div>
+          <h1 className="text-lg font-semibold">Loading your onderwyser…</h1>
+          <p className="text-sm text-[color:var(--muted)] mt-1">
+            Already on your device. We&apos;re reading it into memory — usually
+            10–30 seconds.
+          </p>
+        </div>
+        <div className="skill-bar">
+          <div
+            className="fill"
+            style={{ width: `${Math.max(8, Math.round(autoLoadProgress * 100))}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (stage === "needs-model") {
     return (
