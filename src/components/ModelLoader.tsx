@@ -30,11 +30,15 @@ export function ModelLoader({
   const [smoothedEtaMs, setSmoothedEtaMs] = useState<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const triggered = useRef(false);
+  // Set once the user has tapped a card — prevents the async load of the
+  // previously-saved choice from clobbering a fresh selection that landed
+  // first.
+  const userPicked = useRef(false);
 
   useEffect(() => {
     (async () => {
       const saved = await getSetting("modelId");
-      if (saved) setModelId(saved);
+      if (saved && !userPicked.current) setModelId(saved);
     })();
   }, []);
 
@@ -146,7 +150,10 @@ export function ModelLoader({
               className={`choice ${selected ? "selected" : ""}`}
               disabled={status === "loading"}
               aria-pressed={selected}
-              onClick={() => setModelId(m.id)}
+              onClick={() => {
+                userPicked.current = true;
+                setModelId(m.id);
+              }}
             >
               <div className="flex items-baseline justify-between gap-3">
                 <span className="font-medium">
