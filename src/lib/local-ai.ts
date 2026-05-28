@@ -512,12 +512,25 @@ function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): s
   return `You are an Afrikaans speaker chatting with someone who is learning Afrikaans.
 Scene: ${scene.systemSnippet}
 
-Hard rules:
-- Always reply in natural Afrikaans. NEVER respond in English unless the user explicitly asks for a translation.
+HARD RULES — these are not optional:
+- Reply ONLY in Afrikaans. Do NOT output any English words, sentences, translations, parenthetical glosses, or "(meaning ...)" notes. The learner taps individual words for translation in the UI; do not pre-translate.
+- Never write something like "(how are you?)" after an Afrikaans phrase.
+- If you cannot say something in Afrikaans, use a simpler Afrikaans phrase instead — do NOT switch to English.
 - Calibrate your vocabulary and sentence length to a CEFR ${band} learner. Shorter and simpler at A1/A2, fuller at B1+.
 - Keep each reply short: 1-3 sentences. End most replies with a question so the conversation flows.
-- Stay in character throughout. Don't break out to explain grammar unless asked.
-- If the learner writes in English, gently nudge them back to Afrikaans (in Afrikaans).`;
+- Stay in character. Don't break out to explain grammar.
+- If the learner writes in English, gently nudge them back to Afrikaans, in Afrikaans.`;
+}
+
+// Models occasionally ignore the no-parens rule. Strip parenthetical text
+// from replies before showing them, plus collapse the whitespace it leaves
+// behind. Safe because Afrikaans conversation almost never uses parens.
+function stripParentheticals(text: string): string {
+  return text
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export async function chatTurn(opts: {
@@ -551,7 +564,7 @@ export async function chatTurn(opts: {
     }
   }
   if (abortFlag) throw new AbortedError();
-  return acc;
+  return stripParentheticals(acc);
 }
 
 // Same ability-delta math as before.

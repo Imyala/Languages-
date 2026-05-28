@@ -16,7 +16,7 @@ import {
   onProgress,
   type ChatMessage,
 } from "@/lib/local-ai";
-import { getOrCreateProfile, type AbilityProfile } from "@/lib/storage";
+import { db, getOrCreateProfile, type AbilityProfile } from "@/lib/storage";
 
 type Stage = "loading-model" | "needs-model" | "scene" | "chatting";
 
@@ -29,6 +29,15 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tappedWord, setTappedWord] = useState<string | null>(null);
+  const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
+
+  async function reloadSavedWords() {
+    const entries = await db().lexicon.where({ language: "af" }).toArray();
+    setSavedWords(new Set(entries.map((e) => e.lemma.toLowerCase())));
+  }
+  useEffect(() => {
+    reloadSavedWords();
+  }, []);
   const initialized = useRef(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -248,7 +257,7 @@ export default function ChatPage() {
         </button>
       </div>
 
-      <div className="panel p-4 grid gap-3 min-h-[60vh] max-h-[70vh] overflow-y-auto">
+      <div className="panel p-3 grid gap-2 max-h-[50vh] overflow-y-auto">
         {messages
           .filter((m) => !(m.role === "user" && m.content.startsWith("[Start the scene")))
           .map((m, i) => (
@@ -257,6 +266,7 @@ export default function ChatPage() {
               role={m.role}
               text={m.content}
               onTapWord={setTappedWord}
+              savedWords={savedWords}
             />
           ))}
         {streaming ? <TypingBubble /> : null}
@@ -296,7 +306,12 @@ export default function ChatPage() {
       {tappedWord ? (
         <TranslationSheet
           word={tappedWord}
-          onClose={() => setTappedWord(null)}
+          onClose={() => {
+            setTappedWord(null);
+            // Refresh the saved-words set so newly-added words instantly
+            // lose the dotted underline.
+            reloadSavedWords();
+          }}
         />
       ) : null}
     </div>
@@ -307,10 +322,12 @@ function Bubble({
   role,
   text,
   onTapWord,
+  savedWords,
 }: {
   role: "user" | "assistant";
   text: string;
   onTapWord: (word: string) => void;
+  savedWords: Set<string>;
 }) {
   const isUser = role === "user";
   return (
@@ -321,7 +338,7 @@ function Bubble({
           : "mr-auto bg-white/[0.04] border border-white/[0.06]"
       }`}
     >
-      <TappableText text={text} onTapWord={onTapWord} />
+      <TappableText text={text} onTapWord={onTapWord} savedWords={savedWords} />
     </div>
   );
 }

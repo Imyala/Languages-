@@ -24,9 +24,14 @@ function tokenize(text: string): Token[] {
 export function TappableText({
   text,
   onTapWord,
+  savedWords,
 }: {
   text: string;
   onTapWord: (word: string) => void;
+  // Lowercased lemmas the user has already added to their word bank.
+  // Words in this set render without the dotted underline so the user
+  // can visually scan a message for what's still new.
+  savedWords?: Set<string>;
 }) {
   const tokens = useMemo(() => tokenize(text), [text]);
   return (
@@ -36,7 +41,9 @@ export function TappableText({
           <button
             key={i}
             type="button"
-            className="tappable-word"
+            className={`tappable-word${
+              savedWords?.has(t.text.toLowerCase()) ? " saved" : ""
+            }`}
             onClick={(e) => {
               e.stopPropagation();
               (e.currentTarget as HTMLButtonElement).blur();
