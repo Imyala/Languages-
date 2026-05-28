@@ -93,6 +93,9 @@ export default function Home() {
               <Link href="/write" className="btn btn-primary">
                 Start writing
               </Link>
+              <Link href="/chat" className="btn">
+                Chat
+              </Link>
               <Link href="/placement" className="btn">
                 Retake placement
               </Link>

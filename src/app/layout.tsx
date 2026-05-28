@@ -54,6 +54,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/write" className="text-[color:var(--muted)] hover:text-white">
                 Write
               </Link>
+              <Link href="/chat" className="text-[color:var(--muted)] hover:text-white">
+                Chat
+              </Link>
               <Link href="/setup" className="text-[color:var(--muted)] hover:text-white">
                 Setup
               </Link>

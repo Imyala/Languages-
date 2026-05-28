@@ -221,6 +221,29 @@ function parseJsonish<T>(raw: string): T {
   return JSON.parse(s) as T;
 }
 
+// Set by abortCurrentGeneration() so the streaming loops bail out at their
+// next chunk boundary. Reset at the start of every new jsonChat / chat call.
+let abortFlag = false;
+
+export class AbortedError extends Error {
+  constructor() {
+    super("Generation cancelled.");
+    this.name = "AbortedError";
+  }
+}
+
+export function abortCurrentGeneration(): void {
+  abortFlag = true;
+  if (engine) {
+    try {
+      // WebLLM exposes interruptGenerate() to stop the current decode loop.
+      (engine as unknown as { interruptGenerate(): void }).interruptGenerate();
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 export type GenProgress = {
   tokens: number;
   textSoFar: string;
@@ -239,6 +262,7 @@ async function jsonChat<T>(opts: {
   max_tokens?: number;
   onProgress?: (p: GenProgress) => void;
 }): Promise<T> {
+  abortFlag = false;
   const eng = await ensureEngine();
 
   async function streamOnce(
@@ -258,6 +282,7 @@ async function jsonChat<T>(opts: {
     for await (const chunk of stream as AsyncIterable<{
       choices: Array<{ delta?: { content?: string } }>;
     }>) {
+      if (abortFlag) throw new AbortedError();
       const delta = chunk.choices[0]?.delta?.content ?? "";
       if (delta) {
         acc += delta;
@@ -265,6 +290,7 @@ async function jsonChat<T>(opts: {
         opts.onProgress?.({ tokens, textSoFar: acc, phase });
       }
     }
+    if (abortFlag) throw new AbortedError();
     return acc;
   }
 
@@ -278,6 +304,8 @@ async function jsonChat<T>(opts: {
     raw = await streamOnce(primaryMessages, opts.temperature ?? 0.3, "primary");
     return opts.schema.parse(parseJsonish(raw));
   } catch (firstErr) {
+    // Don't waste a second pass on an explicit abort.
+    if (firstErr instanceof AbortedError) throw firstErr;
     // One retry with explicit repair hint.
     const repairMessages = [
       ...primaryMessages,
@@ -291,7 +319,8 @@ async function jsonChat<T>(opts: {
     try {
       const raw2 = await streamOnce(repairMessages, 0, "repair");
       return opts.schema.parse(parseJsonish(raw2));
-    } catch {
+    } catch (e) {
+      if (e instanceof AbortedError) throw e;
       throw firstErr;
     }
   }
@@ -396,6 +425,102 @@ Grade it. Return only the JSON.`;
     max_tokens: 2048,
     onProgress: opts?.onProgress,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Conversational chat (free-form, no JSON shape)
+// ---------------------------------------------------------------------------
+
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export const CHAT_SCENES: Array<{
+  id: string;
+  label: string;
+  description: string;
+  systemSnippet: string;
+}> = [
+  {
+    id: "casual",
+    label: "Casual chat",
+    description: "Just hang out with a friend.",
+    systemSnippet:
+      "You and the user are old friends catching up. Keep it warm and easy.",
+  },
+  {
+    id: "cafe",
+    label: "At the café",
+    description: "Order food and drinks.",
+    systemSnippet:
+      "You are a friendly server at a South African café. The user is a customer. Greet them, take their order, offer suggestions.",
+  },
+  {
+    id: "directions",
+    label: "Asking directions",
+    description: "Find your way around town.",
+    systemSnippet:
+      "You are a local on a Stellenbosch street. The user is a tourist asking for directions or recommendations.",
+  },
+  {
+    id: "shop",
+    label: "Shopping",
+    description: "Buy clothes, food, anything.",
+    systemSnippet:
+      "You are a friendly shop assistant in a clothing store. The user is browsing; help them find what they need.",
+  },
+  {
+    id: "doctor",
+    label: "Doctor's visit",
+    description: "Describe symptoms, get advice.",
+    systemSnippet:
+      "You are a gentle GP. The user is a patient describing how they feel; ask follow-up questions.",
+  },
+];
+
+function chatSystemPrompt(scene: typeof CHAT_SCENES[number], ability: number): string {
+  const band = cefrFor(ability);
+  return `You are an Afrikaans speaker chatting with someone who is learning Afrikaans.
+Scene: ${scene.systemSnippet}
+
+Hard rules:
+- Always reply in natural Afrikaans. NEVER respond in English unless the user explicitly asks for a translation.
+- Calibrate your vocabulary and sentence length to a CEFR ${band} learner. Shorter and simpler at A1/A2, fuller at B1+.
+- Keep each reply short: 1-3 sentences. End most replies with a question so the conversation flows.
+- Stay in character throughout. Don't break out to explain grammar unless asked.
+- If the learner writes in English, gently nudge them back to Afrikaans (in Afrikaans).`;
+}
+
+export async function chatTurn(opts: {
+  scene: typeof CHAT_SCENES[number];
+  ability: number;
+  history: ChatMessage[];
+  onToken?: (textSoFar: string, tokenCount: number) => void;
+}): Promise<string> {
+  abortFlag = false;
+  const eng = await ensureEngine();
+  const stream = await eng.chat.completions.create({
+    messages: [
+      { role: "system", content: chatSystemPrompt(opts.scene, opts.ability) },
+      ...opts.history,
+    ],
+    temperature: 0.7,
+    max_tokens: 384,
+    stream: true,
+  });
+  let acc = "";
+  let tokens = 0;
+  for await (const chunk of stream as AsyncIterable<{
+    choices: Array<{ delta?: { content?: string } }>;
+  }>) {
+    if (abortFlag) throw new AbortedError();
+    const delta = chunk.choices[0]?.delta?.content ?? "";
+    if (delta) {
+      acc += delta;
+      tokens += 1;
+      opts.onToken?.(acc, tokens);
+    }
+  }
+  if (abortFlag) throw new AbortedError();
+  return acc;
 }
 
 // Same ability-delta math as before.

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { StatusPanel } from "@/components/StatusPanel";
 import { ModelLoader } from "@/components/ModelLoader";
 import {
+  AbortedError,
+  abortCurrentGeneration,
   deltasFromGrading,
   generateWritingPrompt,
   gradeWriting,
@@ -127,7 +129,11 @@ export default function WritePage() {
       setShowModel(false);
       setStage("writing");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof AbortedError) {
+        setError("Cancelled. Try again or switch to a lighter teacher in Setup.");
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
       setStage("writing");
     }
   }
@@ -222,9 +228,17 @@ export default function WritePage() {
       setProfile(updated);
       setStage("graded");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof AbortedError) {
+        setError("Grading cancelled. Tap submit again to retry.");
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
       setStage("writing");
     }
+  }
+
+  function cancelGeneration() {
+    abortCurrentGeneration();
   }
 
   // -----------------------------------------------------------------------
@@ -294,10 +308,16 @@ export default function WritePage() {
                 }}
               />
             </div>
-            <p className="text-xs text-[color:var(--muted)]/70">
-              Your onderwyser is drafting. Each token tick means it&apos;s
-              working — phone hardware typically lands in 20–60s.
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-[color:var(--muted)]/70 flex-1">
+                {genElapsedMs > 90000
+                  ? "Taking longer than expected. Cancel and try again, or pick a lighter teacher in Setup."
+                  : "Your onderwyser is drafting. Each token tick means it's working — phone hardware typically lands in 20–60s."}
+              </p>
+              <button className="btn" onClick={cancelGeneration}>
+                Cancel
+              </button>
+            </div>
           </div>
         ) : (
           <div className="panel panel-accent p-6">
@@ -383,11 +403,16 @@ export default function WritePage() {
                 }}
               />
             </div>
-            <p className="text-xs text-[color:var(--muted)]/70">
-              Your onderwyser is reading your text. Each token tick means
-              it&apos;s working — feedback drops as soon as the response is
-              complete.
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-[color:var(--muted)]/70 flex-1">
+                {genElapsedMs > 90000
+                  ? "Taking longer than expected. Cancel and try again, or pick a lighter teacher in Setup."
+                  : "Your onderwyser is reading your text. Each token tick means it's working — feedback drops as soon as the response is complete."}
+              </p>
+              <button className="btn" onClick={cancelGeneration}>
+                Cancel
+              </button>
+            </div>
           </div>
         ) : null}
 
