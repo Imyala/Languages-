@@ -8,7 +8,7 @@ Free-production writing graded by an **on-device AI**. Stats per skill. Errors f
 ## Stack
 - **Next.js 16** static export (`output: "export"`) — single codebase serves the PWA on mobile + desktop
 - **Tailwind CSS**
-- **WebLLM** (`@mlc-ai/web-llm`) — Llama 3.2 / Qwen 2.5 / Gemma 2 running locally on WebGPU
+- **WebLLM** (`@mlc-ai/web-llm`) — Qwen 3 (0.6B / 1.7B / 4B / 8B) running locally on WebGPU
 - **Dexie** — IndexedDB persistence for all your progress
 - **Serwist** — service worker for offline app shell
 
@@ -24,10 +24,10 @@ You'll be prompted to download a model on the first visit to `/write` (or visit 
 
 | Model | Size | Notes |
 |---|---|---|
-| Llama 3.2 3B (default) | ~2.3 GB | Balanced quality + speed |
-| Qwen 2.5 3B | ~2.5 GB | Best multilingual; recommended for Afrikaans |
-| Gemma 2 2B | ~1.9 GB | Smaller, faster on phones |
-| Llama 3.2 1B | ~0.9 GB | Fastest; noticeably weaker grading |
+| Onderwyser — Qwen 3 4B (default) | ~2.4 GB | Best Afrikaans that still fits most phones |
+| Meester — Qwen 3 8B | ~4.8 GB | Top quality; needs ~6 GB GPU memory (laptop tier) |
+| Skolier — Qwen 3 1.7B | ~1.0 GB | Lighter, snappier on older phones |
+| Leerling — Qwen 3 0.6B | ~0.4 GB | Tiny + fastest; visibly weaker |
 
 ## How it works
 

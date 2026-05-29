@@ -31,39 +31,45 @@ export type ModelPreset = {
 
 // Player-facing tiers, named in Afrikaans so the picker itself reinforces
 // vocabulary. Each name is a real Afrikaans word for a level of education.
-// Underlying weights are unchanged — only the labels change.
+// All four tiers run Qwen 3 — Alibaba's strongest open multilingual family
+// with solid Afrikaans coverage. Sizes go small → large so the user can
+// match a tier to their device's RAM.
 export const MODEL_PRESETS: ModelPreset[] = [
   {
-    id: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    id: "Qwen3-4B-q4f16_1-MLC",
     label: "Onderwyser",
     english: "teacher",
-    tagline: "Default — balanced for most players",
-    description: "Solid all-rounder. Reasonable on a phone, sharp on a laptop. ~2.3 GB.",
-    approxSizeGB: 2.3,
+    tagline: "Default — sharpest Afrikaans on a phone",
+    description:
+      "Qwen 3 4B. Best quality that still fits most phones (needs ~4 GB free RAM). ~2.4 GB download.",
+    approxSizeGB: 2.4,
   },
   {
-    id: "Qwen2.5-3B-Instruct-q4f16_1-MLC",
+    id: "Qwen3-8B-q4f16_1-MLC",
     label: "Meester",
     english: "master",
-    tagline: "Strongest at Afrikaans nuance",
-    description: "Best non-English coverage; the most demanding grader. ~2.5 GB.",
-    approxSizeGB: 2.5,
+    tagline: "Strongest — needs a laptop",
+    description:
+      "Qwen 3 8B. Top Afrikaans nuance, but wants ~6 GB GPU memory. Stick to a smaller tier on phones. ~4.8 GB download.",
+    approxSizeGB: 4.8,
   },
   {
-    id: "gemma-2-2b-it-q4f16_1-MLC",
+    id: "Qwen3-1.7B-q4f16_1-MLC",
     label: "Skolier",
     english: "pupil",
-    tagline: "Lighter — kinder to phones",
-    description: "Smaller download and snappier on mobile. ~1.9 GB.",
-    approxSizeGB: 1.9,
+    tagline: "Lighter — snappier on older phones",
+    description:
+      "Qwen 3 1.7B. Smaller download, faster replies. Misses subtler errors. ~1.0 GB download.",
+    approxSizeGB: 1.0,
   },
   {
-    id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+    id: "Qwen3-0.6B-q4f16_1-MLC",
     label: "Leerling",
     english: "learner",
-    tagline: "Fastest — but visibly weaker",
-    description: "Tiny and fast. Misses subtler Afrikaans errors. ~0.9 GB.",
-    approxSizeGB: 0.9,
+    tagline: "Tiny + fastest",
+    description:
+      "Qwen 3 0.6B. Quickest replies but visibly weaker; good for first-time setup. ~0.4 GB download.",
+    approxSizeGB: 0.4,
   },
 ];
 
@@ -613,8 +619,18 @@ function isTrivialCorrection(original: string, corrected: string): boolean {
 // Parse the model's plain-text response into reply + optional correction.
 // Tolerant: any "###" line on its own marks the start of the correction
 // block; missing or malformed blocks just yield correction = null.
+// Qwen 3 has a "thinking" mode that sometimes emits a <think>…</think>
+// block of internal reasoning before the actual answer. Strip those so
+// they never reach the chat bubble.
+function stripThinkTags(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think>/gi, "")
+    .trim();
+}
+
 function parseChatResponse(raw: string): ChatTurnResult {
-  const cleaned = stripParentheticals(raw);
+  const cleaned = stripParentheticals(stripThinkTags(raw));
   const split = cleaned.split(/\n\s*#{3,}\s*\n/);
   // Apply stripMetaCommentary so any leading English narration or
   // surrounding quotes the model added get cleaned out of the reply.

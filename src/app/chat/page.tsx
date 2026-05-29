@@ -231,19 +231,18 @@ export default function ChatPage() {
           </p>
         </div>
 
-        {isModelReady() && currentModelId() !== "Qwen2.5-3B-Instruct-q4f16_1-MLC" ? (
+        {isModelReady() &&
+        (currentModelId() === "Qwen3-0.6B-q4f16_1-MLC" ||
+          currentModelId() === "Qwen3-1.7B-q4f16_1-MLC") ? (
           <div className="panel p-3 text-xs text-[color:var(--muted)] flex items-baseline gap-2">
             <span
               className="inline-block w-1.5 h-1.5 rounded-full mt-1 shrink-0"
               style={{ background: "var(--accent)" }}
             />
             <span>
-              Current teacher:{" "}
-              <strong className="text-[color:var(--foreground)]">
-                {presetLabelFor(currentModelId())}
-              </strong>
-              . For sharper Afrikaans corrections, switch to <strong>Meester</strong>{" "}
-              <span className="italic">(master)</span> in{" "}
+              On <strong className="text-[color:var(--foreground)]">{presetLabelFor(currentModelId())}</strong>.
+              For sharper Afrikaans, upgrade to <strong>Onderwyser</strong>{" "}
+              (or <strong>Meester</strong> on a laptop) in{" "}
               <Link href="/setup" className="underline">
                 Profile → Onderwyser
               </Link>
